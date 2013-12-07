@@ -135,7 +135,7 @@ public class ApplicationMaster {
     // Listen to process the response from the Node Manager
     private NMCallbackHandler containerListener;
     // Application Attempt Id ( combination of attemptId and fail count )
-    private ApplicationAttemptId appAttemptID;
+    private ApplicationAttemptId appAttemptId;
 
     // For status update for clients - yet to be implemented
     // Hostname of the container
@@ -165,7 +165,7 @@ public class ApplicationMaster {
     // Only request for more if the original requirement changes.
     private final AtomicInteger numRequestedContainers = new AtomicInteger();
 
-    private final Map<String, String> shellEnv = new HashMap<String, String>(); // TODO: check
+    private final Map<String, String> cntnrEnv = new HashMap<String, String>(); // TODO: check
 
     private volatile boolean done;
     private volatile boolean success;
@@ -209,8 +209,8 @@ public class ApplicationMaster {
         LOG.info("Dump debug output");
         final Map<String, String> envs = System.getenv();
         for (final Map.Entry<String, String> env : envs.entrySet()) {
-            LOG.info("System env: key=" + env.getKey() + ", val=" + env.getValue());
-            System.out.println("System env: key=" + env.getKey() + ", val="
+            LOG.info("System env: key: " + env.getKey() + ", val: " + env.getValue());
+            System.out.println("System env: key: " + env.getKey() + ", val: "
                     + env.getValue());
         }
 
@@ -250,22 +250,15 @@ public class ApplicationMaster {
      */
     public boolean init(String[] args) throws ParseException {
         final Options opts = new Options();
-        // TODO: clojure fn. to be executed by AM
-        opts.addOption("container_memory", true,
-                "Amount of memory in MB to be requested to run the shell command");
-        // TODO: check
-        opts.addOption("num_containers", true,
-                "No. of containers on which the shell command needs to be executed");
+        opts.addOption("container_memory", true, "Amount of memory in MB to be requested to?");
         opts.addOption("priority", true, "Application Priority. Default 0");
         opts.addOption("debug", false, "Dump out debug information");
-
         opts.addOption("help", false, "Print usage");
-        final CommandLine cliParser = new GnuParser().parse(opts, args);
 
+        final CommandLine cliParser = new GnuParser().parse(opts, args);
         if (args.length == 0) {
             printUsage(opts);
-            throw new IllegalArgumentException(
-                    "No args specified for application master to initialize");
+            throw new IllegalArgumentException("No args specified for application master to initialize");
         }
 
         if (cliParser.hasOption("help")) {
@@ -282,52 +275,42 @@ public class ApplicationMaster {
         if (!envs.containsKey(Environment.CONTAINER_ID.name())) {
             if (cliParser.hasOption("app_attempt_id")) {
                 final String appIdStr = cliParser.getOptionValue("app_attempt_id", "");
-                appAttemptID = ConverterUtils.toApplicationAttemptId(appIdStr);
+                appAttemptId = ConverterUtils.toApplicationAttemptId(appIdStr);
             } else {
-                throw new IllegalArgumentException(
-                        "Application Attempt Id not set in the environment");
+                throw new IllegalArgumentException("Application Attempt Id not set in the environment");
             }
         } else {
-            final ContainerId containerId = ConverterUtils.toContainerId(envs
-                    .get(Environment.CONTAINER_ID.name()));
-            appAttemptID = containerId.getApplicationAttemptId();
+            final ContainerId containerId = ConverterUtils.toContainerId(envs.get(Environment.CONTAINER_ID.name()));
+            appAttemptId = containerId.getApplicationAttemptId();
         }
 
         if (!envs.containsKey(ApplicationConstants.APP_SUBMIT_TIME_ENV)) {
-            throw new RuntimeException(ApplicationConstants.APP_SUBMIT_TIME_ENV
-                    + " not set in the environment");
+            throw new RuntimeException(ApplicationConstants.APP_SUBMIT_TIME_ENV + " not set in the environment");
+
         }
         if (!envs.containsKey(Environment.NM_HOST.name())) {
-            throw new RuntimeException(Environment.NM_HOST.name()
-                    + " not set in the environment");
+            throw new RuntimeException(Environment.NM_HOST.name() + " not set in the environment");
         }
         if (!envs.containsKey(Environment.NM_HTTP_PORT.name())) {
-            throw new RuntimeException(Environment.NM_HTTP_PORT
-                    + " not set in the environment");
+            throw new RuntimeException(Environment.NM_HTTP_PORT + " not set in the environment");
         }
         if (!envs.containsKey(Environment.NM_PORT.name())) {
-            throw new RuntimeException(Environment.NM_PORT.name()
-                    + " not set in the environment");
+            throw new RuntimeException(Environment.NM_PORT.name() + " not set in the environment");
         }
 
-        LOG.info("Application master for app" + ", appId="
-                + appAttemptID.getApplicationId().getId() + ", clustertimestamp="
-                + appAttemptID.getApplicationId().getClusterTimestamp()
-                + ", attemptId=" + appAttemptID.getAttemptId());
+        LOG.info("Application master for app, appId: "
+                + appAttemptId.getApplicationId().getId() + ", clustertimestamp: "
+                + appAttemptId.getApplicationId().getClusterTimestamp()
+                + ", attemptId: " + appAttemptId.getAttemptId());
 
         // TODO: check setup env for dist-copy?
 
-        containerMemory = Integer.parseInt(cliParser.getOptionValue(
-                "container_memory", "10"));
-        numTotalContainers = Integer.parseInt(cliParser.getOptionValue(
-                "num_containers", "1"));
+        containerMemory = Integer.parseInt(cliParser.getOptionValue("container_memory", "10"));
+        numTotalContainers = Integer.parseInt(cliParser.getOptionValue("num_containers", "1"));
         if (numTotalContainers == 0) {
-            throw new IllegalArgumentException(
-                    "Cannot run distributed shell with no containers");
+            throw new IllegalArgumentException("Cannot run distributed shell with no containers");
         }
-        requestPriority = Integer.parseInt(cliParser
-                .getOptionValue("priority", "0"));
-
+        requestPriority = Integer.parseInt(cliParser.getOptionValue("priority", "0"));
         return true;
     }
 
@@ -349,11 +332,7 @@ public class ApplicationMaster {
     @SuppressWarnings({"unchecked"})
     public boolean run() throws YarnException, IOException {
         LOG.info("Starting ApplicationMaster");
-
-        final Credentials credentials =
-                UserGroupInformation.getCurrentUser().getCredentials();
-        final DataOutputBuffer dob = new DataOutputBuffer();
-        credentials.writeTokenStorageToStream(dob);
+        final Credentials credentials = UserGroupInformation.getCurrentUser().getCredentials();
         // Now remove the AM->RM token so that containers cannot access it.
         final Iterator<Token<?>> iter = credentials.getAllTokens().iterator();
         while (iter.hasNext()) {
@@ -362,6 +341,9 @@ public class ApplicationMaster {
                 iter.remove();
             }
         }
+        // TODO: file bug on DS.
+        final DataOutputBuffer dob = new DataOutputBuffer();
+        credentials.writeTokenStorageToStream(dob);
         allTokens = ByteBuffer.wrap(dob.getData(), 0, dob.getLength());
 
         final AMRMClientAsync.CallbackHandler allocListener = new RMCallbackHandler();
@@ -381,11 +363,11 @@ public class ApplicationMaster {
         // send requests to this app master
 
         // Register self with ResourceManager
-        // This will start heartbeating to the RM
+        // This will start sending heart-beat to the RM
         appMasterHostname = NetUtils.getHostname();
-        final RegisterApplicationMasterResponse response = amRMClient
-                .registerApplicationMaster(appMasterHostname, appMasterRpcPort,
-                        appMasterTrackingUrl);
+        final RegisterApplicationMasterResponse response = amRMClient.registerApplicationMaster(
+                appMasterHostname, appMasterRpcPort, appMasterTrackingUrl);
+
         // Dump out information about cluster capability as seen by the
         // resource manager
         final int maxMem = response.getMaximumResourceCapability().getMemory();
@@ -394,31 +376,27 @@ public class ApplicationMaster {
         // A resource ask cannot exceed the max.
         if (containerMemory > maxMem) {
             LOG.info("Container memory specified above max threshold of cluster."
-                    + " Using max value." + ", specified=" + containerMemory + ", max="
+                    + " Using max value." + ", specified: " + containerMemory + ", max: "
                     + maxMem);
             containerMemory = maxMem;
         }
 
         // Setup ask for containers from RM
         // Send request for containers to RM
-        // Until we get our fully allocated quota, we keep on polling RM for
-        // containers
-        // Keep looping until all the containers are launched and shell script
+        // Until we get our fully allocated quota, we keep on polling RM for containers
+        // Keep looping until all the containers are launched and ?
         // executed on them ( regardless of success/failure).
-        for (int i = 0; i < numTotalContainers; ++i) {
+        for (int i = 0; i < numTotalContainers; i++) {
             final ContainerRequest containerAsk = setupContainerAskForRM();
             amRMClient.addContainerRequest(containerAsk);
         }
         numRequestedContainers.set(numTotalContainers);
-
-        while (!done
-                && (numCompletedContainers.get() != numTotalContainers)) {
+        while (!done && (numCompletedContainers.get() != numTotalContainers)) {
             try {
                 Thread.sleep(200);
             } catch (final InterruptedException ex) {}
         }
         finish();
-
         return success;
     }
 
@@ -458,9 +436,9 @@ public class ApplicationMaster {
             appStatus = FinalApplicationStatus.SUCCEEDED;
         } else {
             appStatus = FinalApplicationStatus.FAILED;
-            appMessage = "Diagnostics." + ", total=" + numTotalContainers
-                    + ", completed=" + numCompletedContainers.get() + ", allocated="
-                    + numAllocatedContainers.get() + ", failed="
+            appMessage = "Diagnostics." + ", total: " + numTotalContainers
+                    + ", completed: " + numCompletedContainers.get() + ", allocated: "
+                    + numAllocatedContainers.get() + ", failed: "
                     + numFailedContainers.get();
             success = false;
         }
@@ -472,39 +450,35 @@ public class ApplicationMaster {
         @SuppressWarnings("unchecked")
         @Override
         public void onContainersCompleted(List<ContainerStatus> completedContainers) {
-            LOG.info("Got response from RM for container ask, completedCnt="
-                    + completedContainers.size());
+            LOG.info("Got response from RM for container ask, completedCnt: " + completedContainers.size());
             for (final ContainerStatus containerStatus : completedContainers) {
-                LOG.info("Got container status for containerID="
-                        + containerStatus.getContainerId() + ", state="
-                        + containerStatus.getState() + ", exitStatus="
-                        + containerStatus.getExitStatus() + ", diagnostics="
+                LOG.info("Got container status for container-Id: "
+                        + containerStatus.getContainerId() + ", state: "
+                        + containerStatus.getState() + ", exitStatus: "
+                        + containerStatus.getExitStatus() + ", diagnostics: "
                         + containerStatus.getDiagnostics());
-
-                // non complete containers should not be here
+                // non-complete containers should not be here
                 assert (containerStatus.getState() == ContainerState.COMPLETE);
-
                 // increment counters for completed/failed containers
                 final int exitStatus = containerStatus.getExitStatus();
-                if (0 != exitStatus) {
+                if (exitStatus != 0) {
                     // container failed
-                    if (ContainerExitStatus.ABORTED != exitStatus) {
+                    if (exitStatus != ContainerExitStatus.ABORTED) {
                         numCompletedContainers.incrementAndGet();
                         numFailedContainers.incrementAndGet();
                     } else {
+                        // TODO: write test-case to simulate container failure
+                        // Note: how to restart specific containers on failure?
                         // container was killed by framework, possibly preempted
                         // we should re-try as the container was lost for some reason
                         numAllocatedContainers.decrementAndGet();
                         numRequestedContainers.decrementAndGet();
-                        // we do not need to release the container as it would be done
-                        // by the RM
+                        // we do not need to release the container as it would be done by the RM
                     }
                 } else {
-                    // nothing to do
-                    // container completed successfully
+                    // nothing to do, container completed successfully
                     numCompletedContainers.incrementAndGet();
-                    LOG.info("Container completed successfully." + ", containerId="
-                            + containerStatus.getContainerId());
+                    LOG.info("Container completed successfully." + ", containerId: " + containerStatus.getContainerId());
                 }
             }
 
@@ -526,18 +500,16 @@ public class ApplicationMaster {
 
         @Override
         public void onContainersAllocated(List<Container> allocatedContainers) {
-            LOG.info("Got response from RM for container ask, allocatedCnt="
-                    + allocatedContainers.size());
+            LOG.info("Got response from RM for container ask, allocated-cnt: " + allocatedContainers.size());
             numAllocatedContainers.addAndGet(allocatedContainers.size());
             for (final Container allocatedContainer : allocatedContainers) {
                 LOG.info("Launching shell command on a new container."
-                        + ", containerId=" + allocatedContainer.getId()
-                        + ", containerNode=" + allocatedContainer.getNodeId().getHost()
+                        + ", containerId: " + allocatedContainer.getId()
+                        + ", containerNode: " + allocatedContainer.getNodeId().getHost()
                         + ":" + allocatedContainer.getNodeId().getPort()
-                        + ", containerNodeURI=" + allocatedContainer.getNodeHttpAddress()
+                        + ", containerNodeUri: " + allocatedContainer.getNodeHttpAddress()
                         + ", containerResourceMemory"
                         + allocatedContainer.getResource().getMemory());
-
                 final LaunchContainer runnableLaunchContainer =
                         new LaunchContainer(allocatedContainer, containerListener);
                 completionService.submit(runnableLaunchContainer);
@@ -563,18 +535,17 @@ public class ApplicationMaster {
         @Override
         public void onError(Throwable e) {
             done = true;
+            LOG.error(e.getMessage(), e);
             amRMClient.stop();
         }
     }
 
     @VisibleForTesting
-    static class NMCallbackHandler
-            implements NMClientAsync.CallbackHandler {
-
+    static class NMCallbackHandler implements NMClientAsync.CallbackHandler {
         private final ConcurrentMap<ContainerId, Container> containers =
                 new ConcurrentHashMap<ContainerId, Container>();
         private final ApplicationMaster applicationMaster;
-
+        
         public NMCallbackHandler(ApplicationMaster applicationMaster) {
             this.applicationMaster = applicationMaster;
         }
@@ -592,17 +563,14 @@ public class ApplicationMaster {
         }
 
         @Override
-        public void onContainerStatusReceived(ContainerId containerId,
-                ContainerStatus containerStatus) {
+        public void onContainerStatusReceived(ContainerId containerId, ContainerStatus containerStatus) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Container Status: id=" + containerId + ", status=" +
-                        containerStatus);
+                LOG.debug("Container Status: id: " + containerId + ", status: " + containerStatus);
             }
         }
 
         @Override
-        public void onContainerStarted(ContainerId containerId,
-                Map<String, ByteBuffer> allServiceResponse) {
+        public void onContainerStarted(ContainerId containerId, Map<String, ByteBuffer> allServiceResponse) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Succeeded to start Container " + containerId);
             }
@@ -614,62 +582,52 @@ public class ApplicationMaster {
 
         @Override
         public void onStartContainerError(ContainerId containerId, Throwable t) {
-            LOG.error("Failed to start Container " + containerId);
+            LOG.error("Failed to start Container " + containerId, t);
             containers.remove(containerId);
             applicationMaster.numCompletedContainers.incrementAndGet();
             applicationMaster.numFailedContainers.incrementAndGet();
         }
 
         @Override
-        public void onGetContainerStatusError(
-                ContainerId containerId, Throwable t) {
-            LOG.error("Failed to query the status of Container " + containerId);
+        public void onGetContainerStatusError(ContainerId containerId, Throwable t) {
+            LOG.error("Failed to query the status of Container " + containerId, t);
         }
 
         @Override
         public void onStopContainerError(ContainerId containerId, Throwable t) {
-            LOG.error("Failed to stop Container " + containerId);
+            LOG.error("Failed to stop Container " + containerId, t);
             containers.remove(containerId);
         }
     }
 
     /**
-     * TODO: actual dist-copy logic comes here. Thread to connect to the
-     * {@link ContainerManagementProtocol} and launch the container that will execute the shell
-     * command.
+     * Thread to connect to the {@link ContainerManagementProtocol} and launch the container that
+     * will execute the shell command.
      */
     private class LaunchContainer implements Callable<Void> {
-
         // Allocated container
         Container container;
-
         NMCallbackHandler containerListener;
 
         /**
          * @param lcontainer Allocated container
          * @param containerListener Callback handler of the container
          */
-        public LaunchContainer(
-                Container lcontainer, NMCallbackHandler containerListener) {
-            this.container = lcontainer;
+        public LaunchContainer(Container container, NMCallbackHandler containerListener) {
+            this.container = container;
             this.containerListener = containerListener;
         }
 
         @Override
         /**
-         * Connects to CM, sets up container launch context 
-         * for shell command and eventually dispatches the container 
+         * Connects to CM, sets up container launch context and eventually dispatches the container  
          * start request to the CM. 
          */
         public Void call() {
-            LOG.info("Setting up container launch container for containerid="
-                    + container.getId());
-            final ContainerLaunchContext ctx = Records
-                    .newRecord(ContainerLaunchContext.class);
-
+            LOG.info("Setting up container launch container for container-id: " + container.getId());
+            final ContainerLaunchContext ctx = Records.newRecord(ContainerLaunchContext.class);
             // Set the environment
-            ctx.setEnvironment(shellEnv);
-
+            ctx.setEnvironment(cntnrEnv);
             // Set the local resources
             final Map<String, LocalResource> localResources = new HashMap<String, LocalResource>();
             ctx.setLocalResources(localResources);
@@ -717,14 +675,11 @@ public class ApplicationMaster {
         final Priority pri = Records.newRecord(Priority.class);
         // TODO - what is the range for priority? how to decide?
         pri.setPriority(requestPriority);
-
         // Set up resource type requirements
         // For now, only memory is supported so we set memory requirements
         final Resource capability = Records.newRecord(Resource.class);
         capability.setMemory(containerMemory);
-
-        final ContainerRequest request = new ContainerRequest(capability, null, null,
-                pri);
+        final ContainerRequest request = new ContainerRequest(capability, null, null, pri);
         LOG.info("Requested container ask: " + request.toString());
         return request;
     }
