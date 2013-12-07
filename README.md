@@ -1,13 +1,8 @@
 # dist-copy
-
-A Clojure library designed to ... well, that part is up to you.
+Distributed copy using YARN
 
 ## Usage
-
-FIXME
+TODO
 
 ## License
-
-Copyright © 2013 FIXME
-
-Distributed under the Eclipse Public License, the same as Clojure.
+TODO
