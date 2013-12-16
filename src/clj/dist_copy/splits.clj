@@ -37,11 +37,11 @@
                                    paths 
                                    (reify PathFilter (accept [_ _] true))))))
 
-(def conf (Configuration.))
-(.set conf "dist.copy.input.paths" "/tmp,/tmp/f1")
-(input-paths conf)
-(seq (glob-status-for-path conf "/tmp" (reify PathFilter (accept [_ _] true))))
-(list-status conf)
+;(def conf (Configuration.))
+;(.set conf "dist.copy.input.paths" "/tmp,/tmp/f1")
+;(input-paths conf)
+;(seq (glob-status-for-path conf "/tmp" (reify PathFilter (accept [_ _] true))))
+;(list-status conf)
 
 
 (defn file-blocks [file-status conf]
