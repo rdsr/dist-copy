@@ -10,22 +10,11 @@
 ;; nothing works yet, just checking in for safe keeping
 
 (defn input-paths
-  "Returns a list of input Path(s) specified in Configuration.
-If for a particular directory, it's children directories are
-present they are filtered out."
   [conf]
-  (let [dirs (.get conf "dist.copy.input.paths", "")
-        components (fn [path]
-                     (take-while 
-                       (complement nil?) 
-                       (iterate #(.getParent %) path)))]
-    (reduce (fn [hs path]
-              (if (some hs (components path))
-                hs
-                (conj hs path)))
-            #{}
-            (for [dir (sort (s/split dirs #", *"))]
-              (-> dir StringUtils/unEscapeString Path.)))))
+  {:pre (nil? (.get conf "dist.copy.input.paths"))} 
+  (let [dirs (.get conf "dist.copy.input.paths")]
+    (for [dir (s/split dirs #", *")]
+      (-> dir StringUtils/unEscapeString Path.))))
 
 
 (defn glob-status-for-path [conf path path-filter]
@@ -39,6 +28,23 @@ present they are filtered out."
 (defn glob-status [conf paths path-filter]
   (mapcat #(glob-status-for-path conf % path-filter) paths))
 
+
+(defn remove-redundant-files
+  [conf file-statuses]
+  (letfn [(components  
+            [path]
+            (take-while 
+              (complement nil?) 
+              (iterate #(.getParent %) path)))]
+     (mapcat (fn [path] 
+               (-> path (.getFileSystem conf) (.listStatus path)))
+             (reduce (fn [hs path]
+                       (if (some hs (components path))
+                         hs
+                         (conj hs path)))
+                     #{}
+                     (sort (map #(.getPath %) file-statuses))))))
+  
 
 (defn remote-files-seq [conf dir-status]
   (let [path (.getPath dir-status)
@@ -56,15 +62,18 @@ present they are filtered out."
 (defn list-status [conf]
   (let [paths (input-paths conf)]
     (letfn [(_list-status_ 
-              [fss]
+              [file-statuses]
               (mapcat (fn [file-status]
                         (if (.isDirectory file-status)
                           (_list-status_ (remote-files-seq conf file-status)) 
                           [file-status]))
-                      fss))]
+                      file-statuses))]
       (_list-status_
-        (glob-status conf paths   
-                     (reify PathFilter (accept [_ _] true)))))))
+        (remove-redundant-files
+          conf
+          (glob-status conf paths
+                       ;; todo add hidden filter
+                       (reify PathFilter (accept [_ _] true))))))))
 
 
 (defn file-blocks [conf file-status]
@@ -79,7 +88,7 @@ present they are filtered out."
     (let [fs (-> file-status .getPath (.getFileSystem conf))]
       (if (instance? LocatedFileStatus file-status)
         (map block (.getBlockLocations file-status))
-        (map block (.getFileBlockLocations fs file-status 0 (.length file-status)))))))
+        (map block (.getFileBlockLocations fs file-status 0 (.getLen file-status)))))))
 
 
 (defn all-blocks
@@ -87,9 +96,8 @@ present they are filtered out."
   (mapcat (partial file-blocks conf) (list-status conf)))
 
 ;(def conf (Configuration.))
-;(.set conf "dist.copy.input.paths" "/tmp/f1, /tmp/f2, /tmp/")
+;(.set conf "dist.copy.input.paths" "/tmp/f1, /*")
 ;(input-paths conf)
-;(list-status conf)
 ;(all-blocks conf)
 
 
@@ -100,63 +108,61 @@ size of all data, and a map of host->blocks"
   [conf]
   (let [m (HashMap.)]
     ;; group by hosts
-    (doseq [block (all-blocks conf) host (:h b)]
-      (.put m (+ (get m :size 0) (:l block)))
+    (doseq [block (all-blocks conf) host (:h block)]
+      (.put m :size (+ (get m :size 0) (:l block)))
       (if (contains? m host)
         (.offer (get m host) block)
         (.put m host (doto (LinkedList.) (.offer block)))))
     [(.remove m :size) m]))
     
 
-(defn generate-splits
-  [conf]
-  (let [[data-size host->blocks] (host->blocks conf)
-        split-size (compute-split-size conf data-size) 
-        rack->blocks (HashMap.)
-        blocks-used  (HashSet.)
-        [create-split close-file] (fn []
-                                    (let [f (create-listings-file conf)]
-                                      [(fn [blocks]
-                                         (doseq [b blocks]
-                                           (.add blocks-used b)
-                                           (.write f b)))
-                                       (fn []
-                                         (.close f))]))]
-    
-    (letfn [(group-by-rack 
-              [blocks]
-              (doseq [block blocks rack (:r block)]
-                (if (contains? rack->blocks rack)
-                  (.offer (get rack->blocks rack) block)
-                  (.put rack->blocks rack (doto (LinkedList.) (.offer block))))))
-            
-            (blocks-to-form-split 
-              [blocks]
-              (loop [total-size 0  
-                     [b bs] (remove #(contains? (dissoc % :h :r)) blocks)
-                     acc []]
-                (cond
-                  (nil? b) [:not-enough acc]
-                  (>= total-size split-size) acc
-                  :else (+ total-size (:l b)) bs (conj acc b))))
-                                                                    
-            (generate-splits-i 
-              [key->blocks all-keys on-not-enough-blocks]
-              (while (not (empty? key->blocks))
-                (let [key (all-keys (rand-int (count keys)))]
-                   (let [blocks (blocks-to-form-split (get key->blocks key))]
-                     (if (not= (blocks 0) :not-enough)
-                       (create-split blocks)
-                       (on-not-enough-blocks (blocks 1)))))))]
-
-      (generate-splits-i host->blocks
-                         (vec (keys host->blocks))
-                         group-by-rack)
-                           
-      (generate-splits-i racks->blocks
-                         (vec (keys rack->blocks))
-                         (fn [blocks] (create-split blocks))))))
-
-
+;(defn generate-splits
+;  [conf]
+;  (let [[data-size host->blocks] (host->blocks conf)
+;        split-size (compute-split-size conf data-size) 
+;        rack->blocks (HashMap.)
+;        blocks-used  (HashSet.)
+;        [create-split close-file] (fn []
+;                                    (let [f (create-listings-file conf)]
+;                                      [(fn [blocks]
+;                                         (doseq [b blocks]
+;                                           (.add blocks-used b)
+;                                           (.write f b)))
+;                                       (fn []
+;                                         (.close f))]))]
+;    
+;    (letfn [(group-by-rack 
+;              [blocks]
+;              (doseq [block blocks rack (:r block)]
+;                (if (contains? rack->blocks rack)
+;                  (.offer (get rack->blocks rack) block)
+;                  (.put rack->blocks rack (doto (LinkedList.) (.offer block))))))
+;            
+;            (blocks-to-form-split 
+;              [blocks]
+;              (loop [total-size 0  
+;                     [b bs] (remove #(contains? (dissoc % :h :r)) blocks)
+;                     acc []]
+;                (cond
+;                  (nil? b) [:not-enough acc]
+;                  (>= total-size split-size) acc
+;                  :else (+ total-size (:l b)) bs (conj acc b))))
+;                                                                    
+;            (generate-splits-i 
+;              [key->blocks all-keys on-not-enough-blocks]
+;              (while (not (empty? key->blocks))
+;                (let [key (all-keys (rand-int (count keys)))]
+;                   (let [blocks (blocks-to-form-split (get key->blocks key))]
+;                     (if (not= (blocks 0) :not-enough)
+;                       (create-split blocks)
+;                       (on-not-enough-blocks (blocks 1)))))))]
+;
+;      (generate-splits-i host->blocks
+;                         (vec (keys host->blocks))
+;                         group-by-rack)
+;                           
+;      (generate-splits-i racks->blocks
+;                         (vec (keys rack->blocks))
+;                         (fn [blocks] (create-split blocks))))))
 
 
