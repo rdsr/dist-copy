@@ -1,55 +1,78 @@
 (ns dist-copy.splits
   (:require [clojure.string :as s])
   (:import [java.io IOException]
-           [java.util HashMap HashSet LinkedList]
+           [java.util HashMap HashSet LinkedList Iterator]
            [org.apache.hadoop.net NodeBase]
            [org.apache.hadoop.conf Configuration]
-           [org.apache.hadoop.fs Path PathFilter LocatedFileStatus]
+           [org.apache.hadoop.fs Path PathFilter LocatedFileStatus RemoteIterator]
            [org.apache.hadoop.util StringUtils]))
 
 ;; nothing works yet, just checking in for safe keeping
 
-(defn input-paths [conf]
-  (let [dirs (.get conf "dist.copy.input.paths", "")]
-    (map #(StringUtils/unEscapeString %) (s/split dirs #","))))
+(defn input-paths
+  "Returns a list of input Path(s) specified in Configuration.
+If for a particular directory, it's children directories are
+present they are filtered out."
+  [conf]
+  (let [dirs (.get conf "dist.copy.input.paths", "")
+        components (fn [path]
+                     (take-while 
+                       (complement nil?) 
+                       (iterate #(.getParent %) path)))]
+    (reduce (fn [hs path]
+              (if (some hs (components path))
+                hs
+                (conj hs path)))
+            #{}
+            (for [dir (sort (s/split dirs #", *"))]
+              (-> dir StringUtils/unEscapeString Path.)))))
 
 
-(defn glob-status-for-path [conf dir path-filter]
-  (let [path (Path. dir)
-        fs (.getFileSystem path conf)
+(defn glob-status-for-path [conf path path-filter]
+  (let [fs (.getFileSystem path conf)
         r (.globStatus fs path path-filter)]
     (if (nil? r)
-      (throw (IOException. (str "Input path: " dir " does not exist.")))
+      (throw (IOException. (str "Input path: " path " does not exist.")))
       r)))
 
   
-(defn glob-status-for-paths [conf dirs path-filter]
-  (mapcat #(glob-status-for-path conf % path-filter) dirs))
+(defn glob-status [conf paths path-filter]
+  (mapcat #(glob-status-for-path conf % path-filter) paths))
 
 
+(defn remote-files-seq [conf dir-status]
+  (let [path (.getPath dir-status)
+        fs (.getFileSystem path conf)
+        remote-iter (.listLocatedStatus fs path)]
+    (letfn [(iter-seq 
+              [iter]
+              (lazy-seq 
+                (if (.hasNext iter)
+                  (cons (.next iter) (iter-seq iter))
+                  nil)))]
+      (iter-seq remote-iter))))
+
+  
 (defn list-status [conf]
   (let [paths (input-paths conf)]
-    (mapcat (fn [stat]
-              (if (.isDirectory stat)
-                (iterator-seq (.listLocatedStatus (-> stat .getPath (.getFileSystem conf)) (.getPath stat)))
-                [stat]))
-            (glob-status-for-paths conf 
-                                   paths 
-                                   (reify PathFilter (accept [_ _] true))))))
-
-;(def conf (Configuration.))
-;(.set conf "dist.copy.input.paths" "/tmp,/tmp/f1")
-;(input-paths conf)
-;(seq (glob-status-for-path conf "/tmp" (reify PathFilter (accept [_ _] true))))
-;(list-status conf)
+    (letfn [(_list-status_ 
+              [fss]
+              (mapcat (fn [file-status]
+                        (if (.isDirectory file-status)
+                          (_list-status_ (remote-files-seq conf file-status)) 
+                          [file-status]))
+                      fss))]
+      (_list-status_
+        (glob-status conf paths   
+                     (reify PathFilter (accept [_ _] true)))))))
 
 
-(defn file-blocks [file-status conf]
+(defn file-blocks [conf file-status]
   (letfn [(block [_b] 
                  {:p (.getPath file-status) 
                   :o (.getOffset _b) 
                   :l (.getLength _b)
-                  :h (.getHosts _b)
+                  :h (-> _b .getHosts seq)
                   :r (map (fn [tp] 
                             (-> tp NodeBase. .getNetworkLocation)) 
                           (.getTopologyPaths _b))})]
@@ -61,7 +84,13 @@
 
 (defn all-blocks
   [conf]
-  (mapcat file-blocks (list-status conf)))
+  (mapcat (partial file-blocks conf) (list-status conf)))
+
+;(def conf (Configuration.))
+;(.set conf "dist.copy.input.paths" "/tmp/f1, /tmp/f2, /tmp/")
+;(input-paths conf)
+;(list-status conf)
+;(all-blocks conf)
 
 
 (defn host->blocks 
@@ -127,6 +156,7 @@ size of all data, and a map of host->blocks"
       (generate-splits-i racks->blocks
                          (vec (keys rack->blocks))
                          (fn [blocks] (create-split blocks))))))
+
 
 
 
