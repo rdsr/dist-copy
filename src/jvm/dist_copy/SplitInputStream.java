@@ -5,7 +5,6 @@ import java.io.InputStream;
 
 public class SplitInputStream extends InputStream {
     Split split;
-
     int chunkIndex;
     int offset;
     
