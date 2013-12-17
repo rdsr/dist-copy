@@ -671,7 +671,7 @@ public class ApplicationMaster {
     private ContainerRequest setupContainerAskForRM() {
         // setup requirements for hosts
         // using * as any host will do for the distributed shell app
-        // set the priority for the request
+        // set the priority for the requestp
         final Priority pri = Records.newRecord(Priority.class);
         // TODO - what is the range for priority? how to decide?
         pri.setPriority(requestPriority);
@@ -681,6 +681,7 @@ public class ApplicationMaster {
         capability.setMemory(containerMemory);
         final ContainerRequest request = new ContainerRequest(capability, null, null, pri);
         LOG.info("Requested container ask: " + request.toString());
+
         return request;
     }
 }
