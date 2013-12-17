@@ -11,7 +11,6 @@
 
 (defn input-paths
   [conf]
-  {:pre (nil? (.get conf "dist.copy.input.paths"))} 
   (let [dirs (.get conf "dist.copy.input.paths")]
     (for [dir (s/split dirs #", *")]
       (-> dir StringUtils/unEscapeString Path.))))
@@ -60,7 +59,12 @@
 
   
 (defn list-status [conf]
-  (let [paths (input-paths conf)]
+  (let [paths (input-paths conf)
+        hidden-files-filter 
+        (reify PathFilter
+          (accept [_ p]
+            (let [name (.getName p)]
+              (not (or (.startsWith name "_") (.startsWith name "."))))))] 
     (letfn [(_list-status_ 
               [file-statuses]
               (mapcat (fn [file-status]
@@ -71,9 +75,8 @@
       (_list-status_
         (remove-redundant-files
           conf
-          (glob-status conf paths
-                       ;; todo add hidden filter
-                       (reify PathFilter (accept [_ _] true))))))))
+          (glob-status conf paths hidden-files-filter))))))
+                    
 
 
 (defn file-blocks [conf file-status]
@@ -87,8 +90,11 @@
                           (.getTopologyPaths _b))})]
     (let [fs (-> file-status .getPath (.getFileSystem conf))]
       (if (instance? LocatedFileStatus file-status)
-        (map block (.getBlockLocations file-status))
-        (map block (.getFileBlockLocations fs file-status 0 (.getLen file-status)))))))
+        (map block 
+             (.getBlockLocations file-status))
+        (map block 
+             (.getFileBlockLocations fs 
+               file-status 0 (.getLen file-status)))))))
 
 
 (defn all-blocks
@@ -96,10 +102,10 @@
   (mapcat (partial file-blocks conf) (list-status conf)))
 
 ;(def conf (Configuration.))
-;(.set conf "dist.copy.input.paths" "/tmp/f1, /*")
+;(.set conf "dist.copy.input.paths" "/tmp/, /**/a*")
 ;(input-paths conf)
 ;(all-blocks conf)
-
+;(host->blocks conf)
 
 (defn host->blocks 
   "Groups blocks by hosts. Note a block could be present
@@ -112,9 +118,18 @@ size of all data, and a map of host->blocks"
       (.put m :size (+ (get m :size 0) (:l block)))
       (if (contains? m host)
         (.offer (get m host) block)
-        (.put m host (doto (LinkedList.) (.offer block)))))
+        (.put m host (doto (LinkedList.) 
+                       (.offer block)))))
     [(.remove m :size) m]))
     
+
+(defn- compute-split-size
+  [conf data-size]
+  (max (.getInt conf "dist.copy.min.split.size", (* 128 1024 1024) 
+       (/ data-size (.getInt conf "dist.copy.num.tasks")))))
+
+
+
 
 ;(defn generate-splits
 ;  [conf]
