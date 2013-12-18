@@ -9,14 +9,22 @@
 
 ;; nothing works yet, just checking in for safe keeping
 
-(defn input-paths
+(defn- input-paths
+   "Returns, as a list, the user specified input paths.
+Paths are comma separated, could contain files and directories,
+path can also be glob patterns. 
+
+i.e: '/tmp/f*.tgz, /tmp/dir2'" 
   [conf]
   (let [dirs (.get conf "dist.copy.input.paths")]
     (for [dir (s/split dirs #", *")]
       (-> dir StringUtils/unEscapeString Path.))))
 
 
-(defn glob-status-for-path [conf path path-filter]
+(defn- glob-status-for-path
+  "Returns all paths which match the glob 
+pattern and satisfy the path filter."
+  [conf path path-filter]
   (let [fs (.getFileSystem path conf)
         r (.globStatus fs path path-filter)]
     (if (nil? r)
@@ -24,62 +32,84 @@
       r)))
 
   
-(defn glob-status [conf paths path-filter]
+(defn- glob-status [conf paths path-filter]
+  "Returns all paths which match the glob-patterns
+and also satisfy the path filter"
   (mapcat #(glob-status-for-path conf % path-filter) paths))
 
 
-(defn remove-redundant-files
+(defn- path-ancestors 
+  "Given a path returns all it's ancestors including
+the path itself /a/b/c --> /a/b/c /a/b /a /"
+  [path]
+  (take-while (complement nil?)  
+              (iterate #(.getParent %) path)))
+
+
+(defn- remove-redundant-files
+  "Removes redundant files from the input so that we 
+don't needlessly process them again. e.g. If the
+input contains /tmp and /tmp/a1, /tmp/a1 is removed
+from the result"
   [conf file-statuses]
-  (letfn [(components  
-            [path]
-            (take-while 
-              (complement nil?) 
-              (iterate #(.getParent %) path)))]
-     (mapcat (fn [path] 
-               (-> path (.getFileSystem conf) (.listStatus path)))
-             (reduce (fn [hs path]
-                       (if (some hs (components path))
-                         hs
-                         (conj hs path)))
-                     #{}
-                     (sort (map #(.getPath %) file-statuses))))))
+  (mapcat (fn [path]
+            (-> path 
+              (.getFileSystem conf) 
+              (.listStatus path)))
+          (reduce (fn [hs path]
+                    (if (some hs (path-ancestors path))
+                      hs
+                      (conj hs path)))
+                  #{}
+                  (sort (map #(.getPath %) file-statuses)))))
   
 
-(defn remote-files-seq [conf dir-status]
+(defn- remote-iterator-seq
+  "Returns a seq on the remote file-status iterator.
+The remote iterator is received when we list the 
+contents of an hdfs directory"
+  [remote-iterator]
+  (lazy-seq 
+    (if (.hasNext iter)
+      (cons (.next iter) (remote-iterator-seq iter))
+      nil)))
+
+
+(defn- remote-files-seq [conf dir-status]
+  "Lists all files under the specified hdfs directoy"
   (let [path (.getPath dir-status)
         fs (.getFileSystem path conf)
         remote-iter (.listLocatedStatus fs path)]
-    (letfn [(iter-seq 
-              [iter]
-              (lazy-seq 
-                (if (.hasNext iter)
-                  (cons (.next iter) (iter-seq iter))
-                  nil)))]
-      (iter-seq remote-iter))))
+    (remote-iterator-seq remote-iter)))
 
+
+(defn- list-status-recursively
+  "Recursively list all files under the dirs specified"
+  [file-statuses]
+  (mapcat (fn [file-status]
+            (if (.isDirectory file-status)
+              (list-status-recursively 
+                (remote-files-seq conf file-status)) 
+              [file-status]))
+          file-statuses)
   
-(defn list-status [conf]
+(defn- list-status [conf]
+  "Recursively list all files under 'dist.copy.input.paths'. If
+the input contains files, those files are also listed. Also removes
+duplicate files from further processing."
   (let [paths (input-paths conf)
         hidden-files-filter 
         (reify PathFilter
           (accept [_ p]
             (let [name (.getName p)]
               (not (or (.startsWith name "_") (.startsWith name "."))))))] 
-    (letfn [(_list-status_ 
-              [file-statuses]
-              (mapcat (fn [file-status]
-                        (if (.isDirectory file-status)
-                          (_list-status_ (remote-files-seq conf file-status)) 
-                          [file-status]))
-                      file-statuses))]
-      (_list-status_
+      (list-status-recursively
         (remove-redundant-files
           conf
           (glob-status conf paths hidden-files-filter))))))
                     
 
-
-(defn file-blocks [conf file-status]
+(defn- file-blocks [conf file-status]
   (letfn [(block [_b] 
                  {:p (.getPath file-status) 
                   :o (.getOffset _b) 
@@ -121,14 +151,20 @@ size of all data, and a map of host->blocks"
         (.put m host (doto (LinkedList.) 
                        (.offer block)))))
     [(.remove m :size) m]))
-    
+
+
+(defn blocks->chunks
+  [blocks]h
+  (let [path->blocks (HashMap.)]
+    (doseq [{:keys [p o l] :as b} blocks]
+      (if (contains? path->blocks p)
+        (.offer (get path->blocks p) [o l])
+        (.put path->blocks p (doto (PriorityQueue. 100 compare) (.offer [o l]))))
 
 (defn- compute-split-size
   [conf data-size]
   (max (.getInt conf "dist.copy.min.split.size", (* 128 1024 1024) 
-       (/ data-size (.getInt conf "dist.copy.num.tasks")))))
-
-
+     (/ data-size (.getInt conf "dist.copy.num.tasks")))))
 
 
 ;(defn generate-splits
