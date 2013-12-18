@@ -141,52 +141,62 @@ duplicate files from further processing."
   (mapcat (partial file-blocks conf) (list-status conf)))
 
 
-(defn- group-blocks-by-host 
-  "Groups blocks by hosts. Note a block could be present
-under multiple hosts (hdfs replication). Returns total
-size of all data, and a map of host->blocks"
-  [conf]
-  (group-by :h (all-blocks conf)))
-  
-  ;(let [group (HashMap.)]
-    ;(doseq [block (all-blocks conf) 
-     ;       host (:h block)]
-;      (.put group :size 
- ;       (+ (get group :size 0) 
-           ;(:l block)))
-      ;(if (contains? group host)
-        ;(.offer (get group host) block)
-        ;(.put group host 
-        ;  (doto (LinkedList.) 
-            ;(.offer block)))))
-    ;[(.remove group :size) group]))
-
-
-(defn- group-blocks-by-rack
-  [blocks]
-  (group-by :r (blocks)))
- ; (doseq [block blocks 
-;          rack (:r block)]
-    ;(if (contains? group rack)
-      ;(.offer (get group rack) block)
-      ;(.put group rack 
-        ;(doto (LinkedList.) 
-          ;(.offer block)))))
-  ;group)
+;(defn- group-blocks-by-host 
+;  "Groups blocks by hosts. Note a block could be present
+;under multiple hosts (hdfs replication). Returns total
+;size of all data, and a map of host->blocks"
+;  [conf]
+;  (group-by :h (all-blocks conf)))
+;
+;(defn- group-blocks-by-rack
+;  [blocks]
+;  (group-by :r (blocks)))
+;
 
 (defn- blocks->chunks
+  "Converts a coll of blocks to a coll of @dist_copy.io.Chunks"
   [blocks]
-  (let [path->blocks (HashMap.)]
-    (doseq [{:keys [p o l] :as b} blocks]
-      (if (contains? path->blocks p)
-        (.offer (get path->blocks p) [o l])
-        (.put path->blocks p (doto (PriorityQueue. 100 compare) (.offer [o l]))))
+  (for [[path grouped-blocks] (group-by :p blocks)]
+    ;TODO: grouped-blocks can contain consecutive blocks, optimise this later
+    (Chunk. path (:l grouped-blocks) (map :o grouped-blocks)))) 
+
 
 (defn- compute-split-size
   [conf data-size]
   (max (.getInt conf "dist.copy.min.split.size", (* 128 1024 1024) 
      (/ data-size (.getInt conf "dist.copy.num.tasks")))))
 
+
+(defn- total-size
+  [blocks]
+  (reduce 
+    (fn [sum b]
+      (+ sum (:l b))) blocks))
+
+
+(defn create-splits
+  [k-blocks ks enough-blocks on-not-enough]
+  (loop [m k-blocks]
+    (if (empty? m)
+      nil
+      (let [k (rand-nth ks)
+            blocks (enough-blocks (m k))]
+        (if (empty? blocks)
+          (do (on-not-enough (m k))
+            (recur (apply dissoc m (m k))))
+          (do (create-split blocks)
+            (recur (apply dissoc m blocks))))))))
+            
+      
+
+(defn generate-splits
+  [conf]
+  (let [blocks      (all-blocks conf)
+        host-blocks (group-by :h blocks) 
+        split-size  (compute-split-size conf (total-size blocks))
+        record-key  (NullWritable.)]
+    (with-open [seqfile-wr (seqfile-writer conf)]
+      (ge
 
 ;(defn generate-splits
 ;  [conf]
