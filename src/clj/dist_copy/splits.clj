@@ -8,6 +8,7 @@
            [org.apache.hadoop.util StringUtils]))
 
 ;; nothing works yet, just checking in for safe keeping
+;; also too imperative (using too many java collections) :(
 
 (defn- input-paths
    "Returns, as a list, the user specified input paths.
@@ -114,7 +115,8 @@ duplicate files from further processing."
                     
 
 (defn- file-blocks
-  "Returns all blocks, as a map {:o offset, :p path, :l length, :h (hosts) :r (racks)}"
+  "Returns all blocks, as a map {:o offset, :p path, 
+:l length, :h (hosts) :r (racks)}, for a given file" 
   [conf file-status]
   (letfn [(block [_b] 
                  {:p (.getPath file-status) 
@@ -139,21 +141,38 @@ duplicate files from further processing."
   (mapcat (partial file-blocks conf) (list-status conf)))
 
 
-(defn- host->blocks 
+(defn- group-blocks-by-host 
   "Groups blocks by hosts. Note a block could be present
 under multiple hosts (hdfs replication). Returns total
 size of all data, and a map of host->blocks"
   [conf]
-  (let [m (HashMap.)]
-    ;; group by hosts
-    (doseq [block (all-blocks conf) host (:h block)]
-      (.put m :size (+ (get m :size 0) (:l block)))
-      (if (contains? m host)
-        (.offer (get m host) block)
-        (.put m host (doto (LinkedList.) 
-                       (.offer block)))))
-    [(.remove m :size) m]))
+  (group-by :h (all-blocks conf)))
+  
+  ;(let [group (HashMap.)]
+    ;(doseq [block (all-blocks conf) 
+     ;       host (:h block)]
+;      (.put group :size 
+ ;       (+ (get group :size 0) 
+           ;(:l block)))
+      ;(if (contains? group host)
+        ;(.offer (get group host) block)
+        ;(.put group host 
+        ;  (doto (LinkedList.) 
+            ;(.offer block)))))
+    ;[(.remove group :size) group]))
 
+
+(defn- group-blocks-by-rack
+  [blocks]
+  (group-by :r (blocks)))
+ ; (doseq [block blocks 
+;          rack (:r block)]
+    ;(if (contains? group rack)
+      ;(.offer (get group rack) block)
+      ;(.put group rack 
+        ;(doto (LinkedList.) 
+          ;(.offer block)))))
+  ;group)
 
 (defn- blocks->chunks
   [blocks]
