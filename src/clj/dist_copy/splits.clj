@@ -32,9 +32,10 @@ pattern and satisfy the path filter."
       r)))
 
   
-(defn- glob-status [conf paths path-filter]
+(defn- glob-status 
   "Returns all paths which match the glob-patterns
 and also satisfy the path filter"
+  [conf paths path-filter]
   (mapcat #(glob-status-for-path conf % path-filter) paths))
 
 
@@ -75,8 +76,9 @@ contents of an hdfs directory"
       nil)))
 
 
-(defn- remote-files-seq [conf dir-status]
+(defn- remote-files-seq
   "Lists all files under the specified hdfs directoy"
+  [conf dir-status]
   (let [path (.getPath dir-status)
         fs (.getFileSystem path conf)
         remote-iter (.listLocatedStatus fs path)]
@@ -93,10 +95,11 @@ contents of an hdfs directory"
               [file-status]))
           file-statuses)
   
-(defn- list-status [conf]
+(defn- list-status 
   "Recursively list all files under 'dist.copy.input.paths'. If
 the input contains files, those files are also listed. Also removes
 duplicate files from further processing."
+  [conf]
   (let [paths (input-paths conf)
         hidden-files-filter 
         (reify PathFilter
@@ -106,10 +109,13 @@ duplicate files from further processing."
       (list-status-recursively
         (remove-redundant-files
           conf
-          (glob-status conf paths hidden-files-filter))))))
+          (glob-status 
+            conf paths hidden-files-filter))))))
                     
 
-(defn- file-blocks [conf file-status]
+(defn- file-blocks
+  "Returns all blocks, as a map {:o offset, :p path, :l length, :h (hosts) :r (racks)}"
+  [conf file-status]
   (letfn [(block [_b] 
                  {:p (.getPath file-status) 
                   :o (.getOffset _b) 
@@ -127,17 +133,13 @@ duplicate files from further processing."
                file-status 0 (.getLen file-status)))))))
 
 
-(defn all-blocks
+(defn- all-blocks
+  "Returns all blocks for each input file specified"
   [conf]
   (mapcat (partial file-blocks conf) (list-status conf)))
 
-;(def conf (Configuration.))
-;(.set conf "dist.copy.input.paths" "/tmp/, /**/a*")
-;(input-paths conf)
-;(all-blocks conf)
-;(host->blocks conf)
 
-(defn host->blocks 
+(defn- host->blocks 
   "Groups blocks by hosts. Note a block could be present
 under multiple hosts (hdfs replication). Returns total
 size of all data, and a map of host->blocks"
@@ -153,8 +155,8 @@ size of all data, and a map of host->blocks"
     [(.remove m :size) m]))
 
 
-(defn blocks->chunks
-  [blocks]h
+(defn- blocks->chunks
+  [blocks]
   (let [path->blocks (HashMap.)]
     (doseq [{:keys [p o l] :as b} blocks]
       (if (contains? path->blocks p)
@@ -217,3 +219,8 @@ size of all data, and a map of host->blocks"
 ;                         (fn [blocks] (create-split blocks))))))
 
 
+;(def conf (Configuration.))
+;(.set conf "dist.copy.input.paths" "/tmp/, /**/a*")
+;(input-paths conf)
+;(all-blocks conf)
+;(host->blocks conf)
