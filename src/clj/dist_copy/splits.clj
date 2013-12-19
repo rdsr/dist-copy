@@ -171,17 +171,24 @@ duplicate files from further processing."
 
 
 (defn- blocks->chunks
-  "Converts a coll of blocks to a coll of @dist_copy.io.Chunks"
-  [blocks]
-  (for [[path grouped-blocks] (group-blocks-by :p blocks)]
-    ;; TODO: grouped-blocks can contain consecutive blocks, optimise this later
-    ;; block-size will be same for all blocks in a file
-    (Chunk. path (:l (first grouped-blocks)) (map :o grouped-blocks)))) 
+  "Converts a coll of blocks, grouped by host or rack, to a coll of @dist_copy.io.Chunks"
+  [grouped-by blocks]
+  (let [block (first blocks)
+        [host rack] (if (= grouped-by :host) 
+                      [(:h block) nil] 
+                      [nil (:r block)])]  
+    (for [[path grouped-blocks] (group-blocks-by :p blocks)]
+      ;; TODO: grouped-blocks can contain consecutive blocks, optimise this later
+      ;; block-size will be same for all blocks in a file
+      (Chunk. path 
+              (:l (first grouped-blocks)) 
+              host rack 
+              (map :o grouped-blocks)))) 
 
 
 (defn- create-split
-  [seqfile-writer blocks]
-  (.append writer (NullWritable.) (Split. (blocks->chunks blocks))))
+  [seqfile-writer grouped-by blocks]
+  (.append writer (NullWritable.) (Split. (blocks->chunks grouped-by blocks))))
 
 
 (defn- create-splits
@@ -206,9 +213,10 @@ duplicate files from further processing."
 
 (defn- splits-file-path
   [conf]
-  (Path. ; TODO: check this, it may not be correct 
-         (str (.get conf "yarn.app.mapreduce.am.staging-dir")
-              "/" (.get conf "yarn.app.attempt.id") "/splits.info.seq")))
+  (Path.
+    ; TODO: check this, it may not be incorrect 
+    (str (.get conf "yarn.app.mapreduce.am.staging-dir")
+         "/" (.get conf "yarn.app.attempt.id") "/splits.info.seq")))
 
 
 (defn- seqfile-writer
@@ -219,20 +227,23 @@ duplicate files from further processing."
       fs conf path NullWritable Split)))
 
 
-(defn generate-splits
+(defn create-splits-file
   [conf]
   (let [blocks      (all-blocks conf)
         host-blocks (group-blocks-by :h blocks)
         split-size  (compute-split-size conf (total-size blocks))]
     (with-open [sf-wr (seqfile-writer conf)]
-      (let [create-split  (partial create-split sf-wr)
+      (let [create-split-host-local (partial create-split sf-wr :host)
+            create-split-rack-local (partial create-split sf-wr :rack)
             enough-blocks (partial enough-blocks split-size)
             rack-blocks   (HashMap.)
             not-enough-blocks (partial group-blocks-by rack-blocks :r)]
         (create-splits 
-          host-blocks create-split enough-blocks not-enough-blocks)            
+          host-blocks (vec (keys host-blocks)) 
+          create-split-host-local enough-blocks not-enough-blocks)             
         (create-splits 
-          racks-blocks create-split enough-blocks create-split)))))
+          rack-blocks (vec (keys rack-blocks)) 
+          create-split-rack-local enough-blocks create-split-rack-local))))) 
 
 
 ;(def conf (Configuration.))
