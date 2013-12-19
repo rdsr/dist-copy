@@ -186,9 +186,10 @@ duplicate files from further processing."
               (map :o grouped-blocks)))) 
 
 
-(defn- create-split
-  [seqfile-writer grouped-by blocks]
-  (.append writer (NullWritable.) (Split. (blocks->chunks grouped-by blocks))))
+(defn- create-split-fn
+  [seqfile-writer grouped-by]
+  (fn [blocks]
+    (.append seqfile-writer (NullWritable.) (Split. (blocks->chunks grouped-by blocks))))
 
 
 (defn- create-splits
@@ -233,17 +234,23 @@ duplicate files from further processing."
         host-blocks (group-blocks-by :h blocks)
         split-size  (compute-split-size conf (total-size blocks))]
     (with-open [sf-wr (seqfile-writer conf)]
-      (let [create-split-host-local (partial create-split sf-wr :host)
-            create-split-rack-local (partial create-split sf-wr :rack)
+      (let [rack-blocks   (HashMap.)
             enough-blocks (partial enough-blocks split-size)
-            rack-blocks   (HashMap.)
             not-enough-blocks (partial group-blocks-by rack-blocks :r)]
+
         (create-splits 
-          host-blocks (vec (keys host-blocks)) 
-          create-split-host-local enough-blocks not-enough-blocks)             
+          host-blocks 
+          (vec (keys host-blocks)) 
+          (create-split-fn sf-wr :host) 
+          enough-blocks 
+          not-enough-blocks)  
+        
         (create-splits 
-          rack-blocks (vec (keys rack-blocks)) 
-          create-split-rack-local enough-blocks create-split-rack-local))))) 
+          rack-blocks 
+          (vec (keys rack-blocks)) 
+          (create-split-fn sf-wr :rack) 
+          enough-blocks 
+          create-split-rack-local))))) 
 
 
 ;(def conf (Configuration.))
