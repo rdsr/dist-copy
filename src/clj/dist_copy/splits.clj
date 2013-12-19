@@ -1,6 +1,7 @@
 (ns dist-copy.splits
   (:require [clojure.string :as s])
-  (:import [java.io IOException]
+  (:import [dist_copy.io Split Chunk] 
+           [java.io IOException]
            [java.util HashMap HashSet LinkedList Iterator]
            [org.apache.hadoop.net NodeBase]
            [org.apache.hadoop.conf Configuration]
@@ -9,7 +10,7 @@
 
 
 (defn- input-paths
-   "Returns, as a list, the user specified input paths.
+  "Returns, as a list, the user specified input paths.
 Paths are comma separated, could contain files and directories,
 path can also be glob patterns. 
 
@@ -31,7 +32,7 @@ pattern and satisfy the path filter."
       (throw (IOException. (str "Input path: " path " does not exist.")))
       r)))
 
-  
+
 (defn- glob-status 
   "Returns all paths which match the glob-patterns
 and also satisfy the path filter"
@@ -63,7 +64,7 @@ from the result"
                       (conj hs path)))
                   #{}
                   (sort (map #(.getPath %) file-statuses)))))
-  
+
 
 (defn- remote-iterator-seq
   "Returns a seq on the remote file-status iterator.
@@ -94,7 +95,7 @@ contents of an hdfs directory"
                 (remote-files-seq conf file-status)) 
               [file-status]))
           file-statuses))
-  
+
 
 (defn- list-status 
   "Recursively list all files under 'dist.copy.input.paths'. If
@@ -107,12 +108,12 @@ duplicate files from further processing."
           (accept [_ p]
             (let [name (.getName p)]
               (not (or (.startsWith name "_") (.startsWith name "."))))))] 
-      (list-status-recursively
-        (remove-redundant-files
-          conf
-          (glob-status 
-            conf paths hidden-files-filter)))))
-                    
+    (list-status-recursively
+      (remove-redundant-files
+        conf
+        (glob-status 
+          conf paths hidden-files-filter)))))
+
 
 (defn- file-blocks
   "Returns all blocks, as a map {:o offset, :p path, 
@@ -141,18 +142,11 @@ duplicate files from further processing."
   (mapcat (partial file-blocks conf) (list-status conf)))
 
 
-(defn- blocks->chunks
-  "Converts a coll of blocks to a coll of @dist_copy.io.Chunks"
-  [blocks]
-  (for [[path grouped-blocks] (group-by :p blocks)]
-    ;TODO: grouped-blocks can contain consecutive blocks, optimise this later
-    (Chunk. path (:l grouped-blocks) (map :o grouped-blocks)))) 
-
-
 (defn- compute-split-size
   [conf data-size]
-  (max (.getInt conf "dist.copy.min.split.size", (* 128 1024 1024) 
-     (/ data-size (.getInt conf "dist.copy.num.tasks")))))
+  (let [default-block-size (* 128 1024 1024)]
+    (max (.getInt conf "dist.copy.min.split.size" default-block-size) 
+         (/ data-size (.getInt conf "dist.copy.num.tasks")))))
 
 
 (defn- total-size
@@ -165,40 +159,6 @@ duplicate files from further processing."
 ;; higly imperative code follows :(
 ;; Todo: maybe try transients on my nested maps here
 
-(defn- create-split
-  [seqfile-writer blocks]
-  (.append writer (NullWritable.) (blocks->split blocks)))
-
-
-(defn- create-splits
-  [k-blocks ks create-split enough-blocks not-enough-blocks]
-  (while (not (empty? k-blocks))
-    (let [k (rand-nth ks)
-          [enough? blocks] (enough-blocks (m k))]
-      (if enough?
-        (create-split blocks)
-        (not-enough-blocks blocks)))))
-        
-
-(defn- enough-blocks 
-  [split-size blocks]
-  (loop [sz 0 acc (LinkedList.)]
-    (cond
-      (>= sz split-size) [true acc]
-      (empty? blocks) [false acc]
-      :else (let [b (.poll blocks)]                 
-              (recur (+ sz (:l b)) (.offer acc b))))))
-
-
-(defn- not-enough-blocks
-  [rack-blocks blocks]
-  (doseq [b blocks]
-    (let [k (:r b)]
-      (if (contains? rack-blocks k))
-      (.put rack-blocks 
-        k (.offer (rack-blocks k) b)))))
-
-
 (defn- group-blocks-by 
   ([f blocks]
     (group-blocks (HashMap.) f blocks))
@@ -210,11 +170,45 @@ duplicate files from further processing."
           k (.offer (m k) b))))))
 
 
+(defn- blocks->chunks
+  "Converts a coll of blocks to a coll of @dist_copy.io.Chunks"
+  [blocks]
+  (for [[path grouped-blocks] (group-blocks-by :p blocks)]
+    ;; TODO: grouped-blocks can contain consecutive blocks, optimise this later
+    ;; block-size will be same for all blocks in a file
+    (Chunk. path (:l (first grouped-blocks)) (map :o grouped-blocks)))) 
+
+
+(defn- create-split
+  [seqfile-writer blocks]
+  (.append writer (NullWritable.) (Split. (blocks->chunks blocks))))
+
+
+(defn- create-splits
+  [k-blocks ks create-split enough-blocks not-enough-blocks]
+  (while (not (empty? k-blocks))
+    (let [k (rand-nth ks)
+          [enough? blocks] (enough-blocks (m k))]
+      (if enough?
+        (create-split blocks)
+        (not-enough-blocks blocks)))))
+
+
+(defn- enough-blocks 
+  [split-size blocks]
+  (loop [sz 0 acc (LinkedList.)]
+    (cond
+      (>= sz split-size) [true acc]
+      (empty? blocks) [false acc]
+      :else (let [b (.poll blocks)]                 
+              (recur (+ sz (:l b)) (.offer acc b))))))
+
+
 (defn- splits-file-path
   [conf]
   (Path. ; TODO: check this, it may not be correct 
-    (str (.get conf "yarn.app.mapreduce.am.staging-dir")
-         "/" (.get conf "yarn.app.attempt.id") "/splits.info.seq")))
+         (str (.get conf "yarn.app.mapreduce.am.staging-dir")
+              "/" (.get conf "yarn.app.attempt.id") "/splits.info.seq")))
 
 
 (defn- seqfile-writer
@@ -223,7 +217,7 @@ duplicate files from further processing."
         fs (.getFileSystem path conf)]
     (SequeneFile/createWriter 
       fs conf path NullWritable Split)))
-  
+
 
 (defn generate-splits
   [conf]
