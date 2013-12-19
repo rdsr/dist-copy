@@ -7,8 +7,6 @@
            [org.apache.hadoop.fs Path PathFilter LocatedFileStatus RemoteIterator]
            [org.apache.hadoop.util StringUtils]))
 
-;; nothing works yet, just checking in for safe keeping
-;; also too imperative (using too many java collections) :(
 
 (defn- input-paths
    "Returns, as a list, the user specified input paths.
@@ -20,6 +18,7 @@ i.e: '/tmp/f*.tgz, /tmp/dir2'"
   (let [dirs (.get conf "dist.copy.input.paths")]
     (for [dir (s/split dirs #", *")]
       (-> dir StringUtils/unEscapeString Path.))))
+
 
 
 (defn- glob-status-for-path
@@ -94,8 +93,9 @@ contents of an hdfs directory"
               (list-status-recursively 
                 (remote-files-seq conf file-status)) 
               [file-status]))
-          file-statuses)
+          file-statuses))
   
+
 (defn- list-status 
   "Recursively list all files under 'dist.copy.input.paths'. If
 the input contains files, those files are also listed. Also removes
@@ -111,7 +111,7 @@ duplicate files from further processing."
         (remove-redundant-files
           conf
           (glob-status 
-            conf paths hidden-files-filter))))))
+            conf paths hidden-files-filter)))))
                     
 
 (defn- file-blocks
@@ -141,18 +141,6 @@ duplicate files from further processing."
   (mapcat (partial file-blocks conf) (list-status conf)))
 
 
-;(defn- group-blocks-by-host 
-;  "Groups blocks by hosts. Note a block could be present
-;under multiple hosts (hdfs replication). Returns total
-;size of all data, and a map of host->blocks"
-;  [conf]
-;  (group-by :h (all-blocks conf)))
-;
-;(defn- group-blocks-by-rack
-;  [blocks]
-;  (group-by :r (blocks)))
-;
-
 (defn- blocks->chunks
   "Converts a coll of blocks to a coll of @dist_copy.io.Chunks"
   [blocks]
@@ -174,78 +162,83 @@ duplicate files from further processing."
       (+ sum (:l b))) blocks))
 
 
-(defn create-splits
-  [k-blocks ks enough-blocks on-not-enough]
-  (loop [m k-blocks]
-    (if (empty? m)
-      nil
-      (let [k (rand-nth ks)
-            blocks (enough-blocks (m k))]
-        (if (empty? blocks)
-          (do (on-not-enough (m k))
-            (recur (apply dissoc m (m k))))
-          (do (create-split blocks)
-            (recur (apply dissoc m blocks))))))))
-            
-      
+;; higly imperative code follows :(
+;; Todo: maybe try transients on my nested maps here
+
+(defn- create-split
+  [seqfile-writer blocks]
+  (.append writer (NullWritable.) (blocks->split blocks)))
+
+
+(defn- create-splits
+  [k-blocks ks create-split enough-blocks not-enough-blocks]
+  (while (not (empty? k-blocks))
+    (let [k (rand-nth ks)
+          [enough? blocks] (enough-blocks (m k))]
+      (if enough?
+        (create-split blocks)
+        (not-enough-blocks blocks)))))
+        
+
+(defn- enough-blocks 
+  [split-size blocks]
+  (loop [sz 0 acc (LinkedList.)]
+    (cond
+      (>= sz split-size) [true acc]
+      (empty? blocks) [false acc]
+      :else (let [b (.poll blocks)]                 
+              (recur (+ sz (:l b)) (.offer acc b))))))
+
+
+(defn- not-enough-blocks
+  [rack-blocks blocks]
+  (doseq [b blocks]
+    (let [k (:r b)]
+      (if (contains? rack-blocks k))
+      (.put rack-blocks 
+        k (.offer (rack-blocks k) b)))))
+
+
+(defn- group-blocks-by 
+  ([f blocks]
+    (group-blocks (HashMap.) f blocks))
+  ([m f blocks]
+    (doseq [b blocks]
+      (let [k (f b)]
+        (if (contains? m k))
+        (.put m 
+          k (.offer (m k) b))))))
+
+
+(defn- splits-file-path
+  [conf]
+  (Path. ; TODO: check this, it may not be correct 
+    (str (.get conf "yarn.app.mapreduce.am.staging-dir")
+         "/" (.get conf "yarn.app.attempt.id") "/splits.info.seq")))
+
+
+(defn- seqfile-writer
+  [conf]
+  (let [path (splits-file-path conf)
+        fs (.getFileSystem path conf)]
+    (SequeneFile/createWriter 
+      fs conf path NullWritable Split)))
+  
 
 (defn generate-splits
   [conf]
   (let [blocks      (all-blocks conf)
-        host-blocks (group-by :h blocks) 
-        split-size  (compute-split-size conf (total-size blocks))
-        record-key  (NullWritable.)]
-    (with-open [seqfile-wr (seqfile-writer conf)]
-      (ge
-
-;(defn generate-splits
-;  [conf]
-;  (let [[data-size host->blocks] (host->blocks conf)
-;        split-size (compute-split-size conf data-size) 
-;        rack->blocks (HashMap.)
-;        blocks-used  (HashSet.)
-;        [create-split close-file] (fn []
-;                                    (let [f (create-listings-file conf)]
-;                                      [(fn [blocks]
-;                                         (doseq [b blocks]
-;                                           (.add blocks-used b)
-;                                           (.write f b)))
-;                                       (fn []
-;                                         (.close f))]))]
-;    
-;    (letfn [(group-by-rack 
-;              [blocks]
-;              (doseq [block blocks rack (:r block)]
-;                (if (contains? rack->blocks rack)
-;                  (.offer (get rack->blocks rack) block)
-;                  (.put rack->blocks rack (doto (LinkedList.) (.offer block))))))
-;            
-;            (blocks-to-form-split 
-;              [blocks]
-;              (loop [total-size 0  
-;                     [b bs] (remove #(contains? (dissoc % :h :r)) blocks)
-;                     acc []]
-;                (cond
-;                  (nil? b) [:not-enough acc]
-;                  (>= total-size split-size) acc
-;                  :else (+ total-size (:l b)) bs (conj acc b))))
-;                                                                    
-;            (generate-splits-i 
-;              [key->blocks all-keys on-not-enough-blocks]
-;              (while (not (empty? key->blocks))
-;                (let [key (all-keys (rand-int (count keys)))]
-;                   (let [blocks (blocks-to-form-split (get key->blocks key))]
-;                     (if (not= (blocks 0) :not-enough)
-;                       (create-split blocks)
-;                       (on-not-enough-blocks (blocks 1)))))))]
-;
-;      (generate-splits-i host->blocks
-;                         (vec (keys host->blocks))
-;                         group-by-rack)
-;                           
-;      (generate-splits-i racks->blocks
-;                         (vec (keys rack->blocks))
-;                         (fn [blocks] (create-split blocks))))))
+        host-blocks (group-blocks-by :h blocks)
+        split-size  (compute-split-size conf (total-size blocks))]
+    (with-open [sf-wr (seqfile-writer conf)]
+      (let [create-split  (partial create-split sf-wr)
+            enough-blocks (partial enough-blocks split-size)
+            rack-blocks   (HashMap.)
+            not-enough-blocks (partial group-blocks-by rack-blocks :r)]
+        (create-splits 
+          host-blocks create-split enough-blocks not-enough-blocks)            
+        (create-splits 
+          racks-blocks create-split enough-blocks create-split)))))
 
 
 ;(def conf (Configuration.))
