@@ -1,6 +1,6 @@
 (defproject dist-copy "0.1.0-SNAPSHOT"
   :source-paths ["src/clj"]
-  :test-paths ["test/clj"]
+  :test-paths  ["test/clj"]
   :java-source-paths ["src/jvm"]
 
   :resource-paths ["conf"]

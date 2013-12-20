@@ -16,8 +16,11 @@
   (when (.isClusterUp cluster)
     (.shutdown cluster)))
 
+;(deftest 
+  ;(testing "splits file creation"
+;   (is (= 0 1))))
 
 
-(deftest 
-  (testing "splits file creation"
-    (is (= 0 1))))
+
+
+
