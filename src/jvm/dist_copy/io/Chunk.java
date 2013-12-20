@@ -12,44 +12,44 @@ import org.apache.hadoop.io.Writable;
 
 public class Chunk implements Writable {
     Path path;
-    int blockSize;
+    Long blockSize;
     String host, rack;
-    Integer[] offsets;
+    Long[] offsets;
 
     public Chunk() {}
 
-    public Chunk(Path path, int blockSize, String host, String rack, Collection<Integer> offsets) {
+    public Chunk(Path path, Long blockSize, String host, String rack, Collection<Long> offsets) {
         this.path = path;
         this.blockSize = blockSize;
         this.host = host;
         this.rack = rack;
-        this.offsets = offsets.toArray(new Integer[0]);
+        this.offsets = offsets.toArray(new Long[0]);
     }
 
     @Override
     public void readFields(DataInput in) throws IOException {
         path = new Path(Text.readString(in));
-        blockSize = in.readInt();
+        blockSize = in.readLong();
         host = Text.readString(in);
         rack = Text.readString(in);
 
         final int sz = in.readInt();
-        offsets = new Integer[sz];
+        offsets = new Long[sz];
         for (int i = 0; i < sz; i++) {
-            offsets[i] = in.readInt();
+            offsets[i] = in.readLong();
         }
     }
 
     @Override
     public void write(DataOutput out) throws IOException {
         Text.writeString(out, path.toString());
-        out.writeInt(blockSize);
+        out.writeLong(blockSize);
         Text.writeString(out, host);
         Text.writeString(out, rack);
 
         out.writeInt(offsets.length);
         for (int i = 0; i < offsets.length; i++) {
-            out.writeInt(offsets[i]);
+            out.writeLong(offsets[i]);
         }
     }
 

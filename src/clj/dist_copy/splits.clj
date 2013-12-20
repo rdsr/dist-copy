@@ -175,9 +175,9 @@ duplicate files from further processing."
   "Converts a coll of blocks, grouped by host or rack, to a coll of @dist_copy.io.Chunks"
   [grouped-by blocks]
   (let [block (first blocks)
-        [host rack] (if (= grouped-by :host)
-                      [(:h block) nil]
-                      [nil (:r block)])]
+        [host rack] (if (some #(= % grouped-by) (:h block))
+                      [grouped-by nil]
+                      [nil grouped-by])]
     (for [[path grouped-blocks] (group-blocks-by 
                                   (fn [b] [(:p b)]) blocks)]
       ;; TODO: grouped-blocks can contain consecutive blocks, optimise this later
@@ -188,10 +188,9 @@ duplicate files from further processing."
               (map :o grouped-blocks)))))
 
 
-
 (defn- create-split-fn
-  [seqfile-writer grouped-by used-blocks]
-  (fn [blocks]
+  [seqfile-writer used-blocks]
+  (fn [grouped-by blocks]
     (.addAll used-blocks blocks)
     (.append seqfile-writer (NullWritable/get) (Split. (blocks->chunks grouped-by blocks)))))
 
@@ -202,8 +201,8 @@ duplicate files from further processing."
     (let [k (rand-nth ks)
           [enough? blocks] (enough-blocks (k-blocks k))]
       (if enough?
-        (create-split blocks)
-        (not-enough-blocks blocks)))))
+        (create-split k blocks)
+        (not-enough-blocks k blocks)))))
 
 
 (defn- enough-blocks
@@ -249,25 +248,30 @@ duplicate files from further processing."
         (create-splits
           host-blocks
           (vec (keys host-blocks))
-          (create-split-fn sf-wr :host used-blocks)
+          (create-split-fn sf-wr used-blocks)
           enough-blocks
           not-enough-blocks)
 
         (create-splits
           rack-blocks
           (vec (keys rack-blocks))
-          (create-split-fn sf-wr :rack used-blocks)
+          (create-split-fn sf-wr used-blocks)
           enough-blocks
-          (create-split-fn sf-wr :rack used-blocks))))))
+          (create-split-fn sf-wr used-blocks))))))
 
-;(defn- print-blocks [grouped-blocks]
-; (doseq [[k v] grouped-blocks]
-;   (println [(class k) k v])))
+
+;(def conf (Configuration.))
+;(.set conf "dist.copy.input.paths" "/tmp/, /**/a*")
+;(.set conf "yarn.app.attempt.id" (str (rand-int 200)))
+;(input-paths conf)
+;(total-size (all-blocks conf))
+;(def host-local-blocks (first (vals (group-blocks-by :h (all-blocks conf)))))
 ;
-(def conf (Configuration.))
-(.set conf "dist.copy.input.paths" "/tmp/, /**/a*")
-(input-paths conf)
-(total-size (all-blocks conf))
-(def host-local-blocks (first (vals (group-blocks-by :h (all-blocks conf)))))
-
-(blocks->chunks :host host-local-blocks)
+;host-local-blocks
+;(blocks->chunks "localhost" host-local-blocks)
+;
+;(def hs (doto (HashSet.) (.add (first host-local-blocks))))
+;(enough-blocks 20000000000  hs host-local-blocks)
+;
+;(splits-file-path conf)
+;(seqfile-writer conf)
