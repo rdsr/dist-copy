@@ -3,6 +3,7 @@
   (:import [dist_copy.io Split Chunk] 
            [java.io IOException]
            [java.util HashMap HashSet LinkedList Iterator]
+           [org.apache.hadoop.io NullWritable SequenceFile]
            [org.apache.hadoop.net NodeBase]
            [org.apache.hadoop.conf Configuration]
            [org.apache.hadoop.fs Path PathFilter LocatedFileStatus RemoteIterator]
@@ -70,10 +71,10 @@ from the result"
   "Returns a seq on the remote file-status iterator.
 The remote iterator is received when we list the 
 contents of an hdfs directory"
-  [remote-iterator]
+  [remote-iter]
   (lazy-seq 
-    (if (.hasNext iter)
-      (cons (.next iter) (remote-iterator-seq iter))
+    (if (.hasNext remote-iter)
+      (cons (.next remote-iter) (remote-iterator-seq remote-iter))
       nil)))
 
 
@@ -88,7 +89,7 @@ contents of an hdfs directory"
 
 (defn- list-status-recursively
   "Recursively list all files under the dirs specified"
-  [file-statuses]
+  [conf file-statuses]
   (mapcat (fn [file-status]
             (if (.isDirectory file-status)
               (list-status-recursively 
@@ -109,6 +110,7 @@ duplicate files from further processing."
             (let [name (.getName p)]
               (not (or (.startsWith name "_") (.startsWith name "."))))))] 
     (list-status-recursively
+      conf
       (remove-redundant-files
         conf
         (glob-status 
@@ -161,14 +163,14 @@ duplicate files from further processing."
 
 (defn- group-blocks-by 
   ([f blocks]
-    (group-blocks (HashMap.) f blocks))
+    (group-blocks-by (HashMap.) f blocks))
   ([m f blocks]
     (doseq [b blocks]
       (let [k (f b)]
-        (if (contains? m k))
-        (.put m 
-          k (.offer (m k) b))))))
-
+        (if (contains? m k)
+          (.put m k (.offer (m k) b))
+          (.put m k (doto (LinkedList.) (.offer b))))))))
+          
 
 (defn- blocks->chunks
   "Converts a coll of blocks, grouped by host or rack, to a coll of @dist_copy.io.Chunks"
@@ -179,24 +181,24 @@ duplicate files from further processing."
                       [nil (:r block)])]  
     (for [[path grouped-blocks] (group-blocks-by :p blocks)]
       ;; TODO: grouped-blocks can contain consecutive blocks, optimise this later
-      ;; block-size will be same for all blocks in a file
-      (Chunk. path 
+      (Chunk. path
+              ;; block-size will be same for all blocks in a file
               (:l (first grouped-blocks)) 
               host rack 
-              (map :o grouped-blocks)))) 
+              (map :o grouped-blocks))))) 
 
 
 (defn- create-split-fn
   [seqfile-writer grouped-by]
   (fn [blocks]
-    (.append seqfile-writer (NullWritable.) (Split. (blocks->chunks grouped-by blocks))))
+    (.append seqfile-writer (NullWritable/get) (Split. (blocks->chunks grouped-by blocks)))))
 
 
 (defn- create-splits
   [k-blocks ks create-split enough-blocks not-enough-blocks]
   (while (not (empty? k-blocks))
     (let [k (rand-nth ks)
-          [enough? blocks] (enough-blocks (m k))]
+          [enough? blocks] (enough-blocks (k-blocks k))]
       (if enough?
         (create-split blocks)
         (not-enough-blocks blocks)))))
@@ -224,7 +226,7 @@ duplicate files from further processing."
   [conf]
   (let [path (splits-file-path conf)
         fs (.getFileSystem path conf)]
-    (SequeneFile/createWriter 
+    (SequenceFile/createWriter 
       fs conf path NullWritable Split)))
 
 
@@ -233,6 +235,7 @@ duplicate files from further processing."
   (let [blocks      (all-blocks conf)
         host-blocks (group-blocks-by :h blocks)
         split-size  (compute-split-size conf (total-size blocks))]
+ 
     (with-open [sf-wr (seqfile-writer conf)]
       (let [rack-blocks   (HashMap.)
             enough-blocks (partial enough-blocks split-size)
@@ -250,11 +253,12 @@ duplicate files from further processing."
           (vec (keys rack-blocks)) 
           (create-split-fn sf-wr :rack) 
           enough-blocks 
-          create-split-rack-local))))) 
+          (create-split-fn sf-wr :rack))))))
 
 
-;(def conf (Configuration.))
-;(.set conf "dist.copy.input.paths" "/tmp/, /**/a*")
-;(input-paths conf)
+
+(def conf (Configuration.))
+(.set conf "dist.copy.input.paths" "/tmp/, /**/a*")
+(input-paths conf)
 ;(all-blocks conf)
 ;(host->blocks conf)
