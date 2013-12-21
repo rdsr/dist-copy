@@ -3,8 +3,9 @@ package dist_copy.io;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Text;
@@ -13,63 +14,75 @@ import org.apache.hadoop.io.Writable;
 import com.google.common.base.Strings;
 
 public class Chunk implements Writable {
-    Path path;
-    Long blockSize;
-    String host, rack;
-    Long[] offsets;
+    private Path path;
+    private String host, rack;
+    private Collection<Block> blocks;
 
     public Chunk() {}
 
-    public Chunk(Path path, Long blockSize, String host, String rack, Collection<Long> offsets) {
+    public Chunk(Path path, String host, String rack, Collection<Block> blocks) {
         this.path = path;
-        this.blockSize = blockSize;
         this.host = host;
         this.rack = rack;
-        this.offsets = offsets.toArray(new Long[0]);
+        this.blocks = new ArrayList<>(blocks);
+    }
+
+    public Path getPath() {
+        return path;
+    }
+
+    public String getHost() {
+        return host;
+    }
+
+    public String getRack() {
+        return rack;
+    }
+
+    public Collection<Block> getBlocks() {
+        return Collections.unmodifiableCollection(blocks);
     }
 
     @Override
     public void readFields(DataInput in) throws IOException {
         path = new Path(Text.readString(in));
-        blockSize = in.readLong();
         if (in.readBoolean()) {
             host = Text.readString(in);
         }
         if (in.readBoolean()) {
             rack = Text.readString(in);
         }
-        final int sz = in.readInt();
-        offsets = new Long[sz];
-        for (int i = 0; i < sz; i++) {
-            offsets[i] = in.readLong();
+        blocks = new ArrayList<>(in.readInt());
+        for (int i = 0; i < blocks.size(); i++) {
+            final Block b = new Block();
+            b.readFields(in);
+            blocks.add(b);
         }
     }
 
     @Override
     public void write(DataOutput out) throws IOException {
         Text.writeString(out, path.toString());
-        out.writeLong(blockSize);
-        if (Strings.isNullOrEmpty(host)) {
-            out.writeBoolean(false);
-        } else {
-            out.writeBoolean(false);
-            Text.writeString(out, host);
-        }
-        if (Strings.isNullOrEmpty(rack)) {
-            out.writeBoolean(false);
-        } else {
-            out.writeBoolean(true);
-            Text.writeString(out, rack);
-        }
-        out.writeInt(offsets.length);
-        for (int i = 0; i < offsets.length; i++) {
-            out.writeLong(offsets[i]);
+        serializeOptionalString(out, host);
+        serializeOptionalString(out, rack);
+        out.writeInt(blocks.size());
+        for (final Block b : blocks) {
+            b.write(out);
         }
     }
 
+
     @Override
     public String toString() {
-        return "Chunk [path=" + path + ", blockSize=" + blockSize + ", host=" + host + ", rack=" + rack + ", offsets="
-                + Arrays.toString(offsets) + "]";
+        return "Chunk [path=" + path + ", host=" + host + ", rack=" + rack + ", blocks=" + blocks + "]";
+    }
+
+    private static void serializeOptionalString(DataOutput out, String s) throws IOException {
+        if (Strings.isNullOrEmpty(s)) {
+            out.writeBoolean(false);
+        } else {
+            out.writeBoolean(false);
+            Text.writeString(out, s);
+        }
     }
 }

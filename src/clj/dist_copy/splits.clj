@@ -172,6 +172,7 @@ duplicate files from further processing."
     m))
 
 
+
 (defn- block-size [conf path]
   (-> path (.getFileSystem conf) (.getFileStatus path) .getBlockSize))  
 
