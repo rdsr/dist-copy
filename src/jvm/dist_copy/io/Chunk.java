@@ -81,7 +81,7 @@ public class Chunk implements Writable {
         if (Strings.isNullOrEmpty(s)) {
             out.writeBoolean(false);
         } else {
-            out.writeBoolean(false);
+            out.writeBoolean(true);
             Text.writeString(out, s);
         }
     }

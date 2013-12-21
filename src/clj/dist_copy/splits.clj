@@ -1,6 +1,6 @@
 (ns dist-copy.splits
   (:require [clojure.string :as s])
-  (:import [dist_copy.io Split Chunk]
+  (:import [dist_copy.io Split Chunk Block]
            [java.io IOException]
            [java.util HashMap HashSet LinkedList Iterator]
            [org.apache.hadoop.io NullWritable SequenceFile]
@@ -121,22 +121,24 @@ duplicate files from further processing."
   "Returns all blocks, as a map {:o offset, :p path,
 :l length, :h (hosts) :r (racks)}, for a given file"
   [conf file-status]
-  (letfn [(block [_b]
-                 {:p (.getPath file-status)
+  (let [path (.getPath file-status)
+        fs   (.getFileSystem path conf)]
+  (letfn [(racks [_b] 
+                 (map (fn [tp]
+                        (-> tp NodeBase. .getNetworkLocation))
+                      (.getTopologyPaths _b)))
+          (block [_b]
+                 {:p path
                   :o (.getOffset _b)
                   :l (.getLength _b)
                   :h (-> _b .getHosts seq)
-                  :r (map (fn [tp]
-                            (-> tp NodeBase. .getNetworkLocation))
-                          (.getTopologyPaths _b))})]
-    (let [fs (-> file-status .getPath (.getFileSystem conf))]
-      (if (instance? LocatedFileStatus file-status)
-        (map block
-             (.getBlockLocations file-status))
-        (map block
-             (.getFileBlockLocations fs
-               file-status 0 (.getLen file-status)))))))
-
+                  :r (racks _b)})]
+      (map block
+           (if (instance? LocatedFileStatus file-status)
+             (.getBlockLocations file-status)
+             (.getFileBlockLocations 
+               fs file-status 0 (.getLen file-status)))))))
+               
 
 (defn- all-blocks
   "Returns all blocks for each input file specified"
@@ -165,16 +167,16 @@ duplicate files from further processing."
   ([f blocks]
     (group-blocks-by (HashMap.) f blocks))
   ([m f blocks]
-    (doseq [b blocks k (f b)]
-      (when (not (contains? m k))
-        (.put m k (LinkedList.)))
-      (.put m k (doto (get m k) (.offer b))))
-    m))
+    (letfn [(group-fn 
+              [block]
+              (let [r (f block)]
+                (if (coll? r) r [r])))]
+      (doseq [b blocks k (group-fn b)]
+        (when (not (contains? m k))
+          (.put m k (LinkedList.)))
+        (.put m k (doto (get m k) (.offer b))))
+      m)))
 
-
-
-(defn- block-size [conf path]
-  (-> path (.getFileSystem conf) (.getFileStatus path) .getBlockSize))  
 
 (defn- blocks->chunks
   "Converts a coll of blocks, grouped by host or rack, to a coll of @dist_copy.io.Chunks"
@@ -183,13 +185,16 @@ duplicate files from further processing."
         [host rack] (if (some #(= % grouped-by) (:h block))
                       [grouped-by nil]
                       [nil grouped-by])]
-    (for [[path grouped-blocks] (group-blocks-by 
-                                  (fn [b] [(:p b)]) blocks)]
+    (for [[path grouped-blocks] 
+          (group-blocks-by :p blocks)] 
       ;; TODO: grouped-blocks can contain consecutive blocks, optimise this later
       (Chunk. path
-              (block-size conf path)
-              host rack
-              (map :o grouped-blocks)))))
+              host 
+              rack
+              (map (fn [{:keys [o l h r]}]
+                     (Block. o l h r))
+                   grouped-blocks)))))
+
 
 
 (defn- create-split-fn
@@ -250,26 +255,17 @@ duplicate files from further processing."
             rack-blocks   (HashMap.)
             create-split  (create-split-fn conf sf-wr used-blocks)
             enough-blocks (partial enough-blocks split-size used-blocks)
-            not-enough-blocks (partial group-blocks-by rack-blocks :r)]
+            not-enough-blocks (fn [host-or-rack blocks] 
+                                (group-blocks-by rack-blocks :r blocks))]
 
         (create-splits
-          host-blocks (vec (keys host-blocks)) create-split enough-blocks not-enough-blocks)
+          host-blocks (vec (keys host-blocks)) 
+          create-split enough-blocks not-enough-blocks)
         (create-splits 
-          rack-blocks (vec (keys rack-blocks)) create-split enough-blocks create-split)))))
+          rack-blocks (vec (keys rack-blocks)) 
+          create-split enough-blocks create-split)))))
 
 (def conf (Configuration.))
 (.set conf "dist.copy.input.paths" "/tmp/f1, /tmp/hadoop*gz*")
 (.set conf "yarn.app.attempt.id" (str (rand-int 200)))
-;(input-paths conf)
-;(total-size (all-blocks conf))
-;(def host-local-blocks (first (vals (group-blocks-by :h (all-blocks conf)))))
-
-;host-local-blocks
-;(blocks->chunks "localhost" host-local-blocks)
-
-;(def hs (doto (HashSet.) (.add (first host-local-blocks))))
-;(enough-blocks 20000000000  hs host-local-blocks)
-
-;(compute-split-size conf (total-size (all-blocks conf)))
-;(splits-file-path 
 (create-splits-file conf)

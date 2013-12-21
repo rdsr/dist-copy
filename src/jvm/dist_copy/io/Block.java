@@ -42,6 +42,11 @@ public class Block implements Writable {
     }
 
     @Override
+    public String toString() {
+        return "Block [offset=" + offset + ", len=" + len + ", hosts=" + hosts + ", racks=" + racks + "]";
+    }
+
+    @Override
     public void readFields(DataInput in) throws IOException {
         offset = in.readLong();
         len = in.readLong();
@@ -50,7 +55,7 @@ public class Block implements Writable {
             hosts.add(Text.readString(in));
         }
         racks = new ArrayList<>(in.readInt());
-        for (int i = 0; i < hosts.size(); i++) {
+        for (int i = 0; i < racks.size(); i++) {
             racks.add(Text.readString(in));
         }
     }
@@ -69,3 +74,4 @@ public class Block implements Writable {
         }
     }
 }
+    

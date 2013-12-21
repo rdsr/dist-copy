@@ -36,7 +36,7 @@ public class Split implements Writable {
     @Override
     public void write(DataOutput out) throws IOException {
         out.writeInt(chunks.size());
-        for (final Chunk c : chunks) {
+        for (final Chunk c : chunks) {            
             c.write(out);
         }
     }
