@@ -10,6 +10,8 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.Writable;
 
+import com.google.common.base.Strings;
+
 public class Chunk implements Writable {
     Path path;
     Long blockSize;
@@ -30,9 +32,12 @@ public class Chunk implements Writable {
     public void readFields(DataInput in) throws IOException {
         path = new Path(Text.readString(in));
         blockSize = in.readLong();
-        host = Text.readString(in);
-        rack = Text.readString(in);
-
+        if (in.readBoolean()) {
+            host = Text.readString(in);
+        }
+        if (in.readBoolean()) {
+            rack = Text.readString(in);
+        }
         final int sz = in.readInt();
         offsets = new Long[sz];
         for (int i = 0; i < sz; i++) {
@@ -44,9 +49,18 @@ public class Chunk implements Writable {
     public void write(DataOutput out) throws IOException {
         Text.writeString(out, path.toString());
         out.writeLong(blockSize);
-        Text.writeString(out, host);
-        Text.writeString(out, rack);
-
+        if (Strings.isNullOrEmpty(host)) {
+            out.writeBoolean(false);
+        } else {
+            out.writeBoolean(false);
+            Text.writeString(out, host);
+        }
+        if (Strings.isNullOrEmpty(rack)) {
+            out.writeBoolean(false);
+        } else {
+            out.writeBoolean(true);
+            Text.writeString(out, rack);
+        }
         out.writeInt(offsets.length);
         for (int i = 0; i < offsets.length; i++) {
             out.writeLong(offsets[i]);

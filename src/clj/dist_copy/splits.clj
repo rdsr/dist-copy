@@ -148,7 +148,7 @@ duplicate files from further processing."
   [conf data-size]
   (let [default-block-size (* 128 1024 1024)]
     (max (.getInt conf "dist.copy.min.split.size" default-block-size)
-         (/ data-size (.getInt conf "dist.copy.num.tasks")))))
+         (/ data-size (.getInt conf "dist.copy.num.tasks" 1)))))
 
 
 (defn- total-size
@@ -171,9 +171,13 @@ duplicate files from further processing."
       (.put m k (doto (get m k) (.offer b))))
     m))
 
+
+(defn- block-size [conf path]
+  (-> path (.getFileSystem conf) (.getFileStatus path) .getBlockSize))  
+
 (defn- blocks->chunks
   "Converts a coll of blocks, grouped by host or rack, to a coll of @dist_copy.io.Chunks"
-  [grouped-by blocks]
+  [conf grouped-by blocks]
   (let [block (first blocks)
         [host rack] (if (some #(= % grouped-by) (:h block))
                       [grouped-by nil]
@@ -182,27 +186,28 @@ duplicate files from further processing."
                                   (fn [b] [(:p b)]) blocks)]
       ;; TODO: grouped-blocks can contain consecutive blocks, optimise this later
       (Chunk. path
-              ;; block-size will be same for all blocks in a file
-              (:l (first grouped-blocks))
+              (block-size conf path)
               host rack
               (map :o grouped-blocks)))))
 
 
 (defn- create-split-fn
-  [seqfile-writer used-blocks]
+  [conf seqfile-writer used-blocks]
   (fn [grouped-by blocks]
     (.addAll used-blocks blocks)
-    (.append seqfile-writer (NullWritable/get) (Split. (blocks->chunks grouped-by blocks)))))
+    (.append seqfile-writer (NullWritable/get) (Split. (blocks->chunks conf grouped-by blocks)))))
 
 
 (defn- create-splits
   [k-blocks ks create-split enough-blocks not-enough-blocks]
   (while (not (empty? k-blocks))
     (let [k (rand-nth ks)
-          [enough? blocks] (enough-blocks (k-blocks k))]
-      (if enough?
-        (create-split k blocks)
-        (not-enough-blocks k blocks)))))
+          [enough? blocks] (enough-blocks (get k-blocks k))]
+      (if enough? 
+        (create-split k blocks) 
+        (do 
+          (.remove k-blocks k) 
+          (not-enough-blocks k blocks))))))
 
 
 (defn- enough-blocks
@@ -242,36 +247,28 @@ duplicate files from further processing."
     (with-open [sf-wr (seqfile-writer conf)]
       (let [used-blocks   (HashSet.)
             rack-blocks   (HashMap.)
+            create-split  (create-split-fn conf sf-wr used-blocks)
             enough-blocks (partial enough-blocks split-size used-blocks)
             not-enough-blocks (partial group-blocks-by rack-blocks :r)]
 
         (create-splits
-          host-blocks
-          (vec (keys host-blocks))
-          (create-split-fn sf-wr used-blocks)
-          enough-blocks
-          not-enough-blocks)
+          host-blocks (vec (keys host-blocks)) create-split enough-blocks not-enough-blocks)
+        (create-splits 
+          rack-blocks (vec (keys rack-blocks)) create-split enough-blocks create-split)))))
 
-        (create-splits
-          rack-blocks
-          (vec (keys rack-blocks))
-          (create-split-fn sf-wr used-blocks)
-          enough-blocks
-          (create-split-fn sf-wr used-blocks))))))
-
-
-;(def conf (Configuration.))
-;(.set conf "dist.copy.input.paths" "/tmp/, /**/a*")
-;(.set conf "yarn.app.attempt.id" (str (rand-int 200)))
+(def conf (Configuration.))
+(.set conf "dist.copy.input.paths" "/tmp/f1, /tmp/hadoop*gz*")
+(.set conf "yarn.app.attempt.id" (str (rand-int 200)))
 ;(input-paths conf)
 ;(total-size (all-blocks conf))
 ;(def host-local-blocks (first (vals (group-blocks-by :h (all-blocks conf)))))
-;
+
 ;host-local-blocks
 ;(blocks->chunks "localhost" host-local-blocks)
-;
+
 ;(def hs (doto (HashSet.) (.add (first host-local-blocks))))
 ;(enough-blocks 20000000000  hs host-local-blocks)
-;
-;(splits-file-path conf)
-;(seqfile-writer conf)
+
+;(compute-split-size conf (total-size (all-blocks conf)))
+;(splits-file-path 
+(create-splits-file conf)
