@@ -13,7 +13,7 @@ import org.apache.hadoop.util.ReflectionUtils;
 
 public class SequenceFileReadDemo {
     public static void main(String[] args) throws IOException {
-        final String uri = "hdfs://localhost:8020/tmp/hadoop-yarn/staging/127/splits.info.seq";
+        final String uri = "hdfs://localhost:8020//tmp/hadoop-yarn/staging/38/splits.info.seq";
         final Configuration conf = new Configuration();
         final FileSystem fs = FileSystem.get(URI.create(uri), conf);
         final Path path = new Path(uri);
@@ -28,6 +28,7 @@ public class SequenceFileReadDemo {
             while (reader.next(key, value)) {
                 final String syncSeen = reader.syncSeen() ? "*" : "";
                 System.out.printf("[%s%s]\t%s\t%s\n", position, syncSeen, key, value);
+                System.out.println();
                 position = reader.getPosition(); // beginning of next record
             }
         } finally {

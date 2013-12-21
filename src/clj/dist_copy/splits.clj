@@ -196,7 +196,6 @@ duplicate files from further processing."
                    grouped-blocks)))))
 
 
-
 (defn- create-split-fn
   [conf seqfile-writer used-blocks]
   (fn [grouped-by blocks]
@@ -268,4 +267,5 @@ duplicate files from further processing."
 (def conf (Configuration.))
 (.set conf "dist.copy.input.paths" "/tmp/f1, /tmp/hadoop*gz*")
 (.set conf "yarn.app.attempt.id" (str (rand-int 200)))
+(.set conf "dist.copy.num.tasks" "3")
 (create-splits-file conf)

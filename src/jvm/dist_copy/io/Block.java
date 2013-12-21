@@ -50,12 +50,14 @@ public class Block implements Writable {
     public void readFields(DataInput in) throws IOException {
         offset = in.readLong();
         len = in.readLong();
-        hosts = new ArrayList<>(in.readInt());
-        for (int i = 0; i < hosts.size(); i++) {
+        int hsz = in.readInt();
+        hosts = new ArrayList<>(hsz);
+        for (int i = 0; i < hsz; i++) {
             hosts.add(Text.readString(in));
         }
-        racks = new ArrayList<>(in.readInt());
-        for (int i = 0; i < racks.size(); i++) {
+        int rsz = in.readInt();
+        racks = new ArrayList<>(rsz);
+        for (int i = 0; i < rsz; i++) {
             racks.add(Text.readString(in));
         }
     }

@@ -52,8 +52,9 @@ public class Chunk implements Writable {
         if (in.readBoolean()) {
             rack = Text.readString(in);
         }
-        blocks = new ArrayList<>(in.readInt());
-        for (int i = 0; i < blocks.size(); i++) {
+        int sz = in.readInt();
+        blocks = new ArrayList<>(sz);
+        for (int i = 0; i < sz; i++) {
             final Block b = new Block();
             b.readFields(in);
             blocks.add(b);
