@@ -207,11 +207,14 @@ duplicate files from further processing."
   [k-blocks ks create-split enough-blocks not-enough-blocks]
   (while (not (empty? k-blocks))
     (let [k (rand-nth ks)
-          [enough? blocks] (enough-blocks (get k-blocks k))]
+          blocks (get k-blocks k)
+          [enough? blocks] (enough-blocks blocks)]
       (if enough? 
-        (create-split k blocks) 
-        (do 
-          (.remove k-blocks k) 
+        (create-split k blocks)
+        (if (empty? blocks)
+          ;; No more blocks for host/rack 'k', 
+          ;; remove the key from the map 
+          (.remove k-blocks k)
           (not-enough-blocks k blocks))))))
 
 
@@ -263,9 +266,3 @@ duplicate files from further processing."
         (create-splits 
           rack-blocks (vec (keys rack-blocks)) 
           create-split enough-blocks create-split)))))
-
-;(def conf (Configuration.))
-;(.set conf "dist.copy.input.paths" "/tmp/f1, /tmp/hadoop*gz*")
-;(.set conf "yarn.app.attempt.id" (str (rand-int 200)))
-;(.set conf "dist.copy.num.tasks" "4")
-;(create-splits-file conf)

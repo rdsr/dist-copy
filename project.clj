@@ -7,9 +7,9 @@
   :description "Distributed copy using YARN"
   :dependencies [[org.clojure/clojure "1.5.1"]
                  [reply "0.2.1"]
-                 [org.apache.hadoop/hadoop-common "2.2.0"]
-                 [org.apache.hadoop/hadoop-hdfs "2.2.0"]
-                 [org.apache.hadoop/hadoop-hdfs "2.2.0" :scope "test" :classifier "tests"]
-                 [org.apache.hadoop/hadoop-mapreduce-client-core "2.2.0"]
-                 [org.apache.hadoop/hadoop-mapreduce-client-common "2.2.0"]
-                 [org.apache.hadoop/hadoop-yarn-common "2.2.0"]])
+                 [org.apache.hadoop/hadoop-common "0.23.9"]
+                 [org.apache.hadoop/hadoop-hdfs "0.23.9"]
+                 [org.apache.hadoop/hadoop-hdfs "0.23.9" :scope "test" :classifier "tests"]
+                 [org.apache.hadoop/hadoop-mapreduce-client-core "0.23.9"]
+                 [org.apache.hadoop/hadoop-mapreduce-client-common "0.23.9"]
+                 [org.apache.hadoop/hadoop-yarn-common "0.23.9"]])

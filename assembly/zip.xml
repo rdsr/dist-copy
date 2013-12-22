@@ -12,9 +12,6 @@
       <useProjectArtifact>true</useProjectArtifact>
       <unpack>false</unpack>
       <scope>runtime</scope>
-      <excludes>
-        <exclude>org.jruby:jruby-complete</exclude>
-      </excludes>
     </dependencySet>
   </dependencySets>
   <fileSets>
