@@ -1,0 +1,34 @@
+<assembly xmlns="http://maven.apache.org/plugins/maven-assembly-plugin/assembly/1.1.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/plugins/maven-assembly-plugin/assembly/1.1.0 http://maven.apache.org/xsd/assembly-1.1.0.xsd">
+  <id>package</id>
+  <formats>
+    <format>zip</format>
+  </formats>
+  <includeBaseDirectory>false</includeBaseDirectory>
+  <dependencySets>
+    <dependencySet>
+      <outputDirectory>/lib</outputDirectory>
+      <useProjectArtifact>true</useProjectArtifact>
+      <unpack>false</unpack>
+      <scope>runtime</scope>
+      <excludes>
+        <exclude>org.jruby:jruby-complete</exclude>
+      </excludes>
+    </dependencySet>
+  </dependencySets>
+  <fileSets>
+    <fileSet>
+      <directory>resources</directory>
+      <outputDirectory>/resources</outputDirectory>
+    </fileSet>
+    <fileSet>
+      <directory>bin</directory>
+      <outputDirectory>/bin</outputDirectory>
+    </fileSet>
+    <fileSet>
+      <directory>conf</directory>
+      <outputDirectory>/conf</outputDirectory>
+    </fileSet>
+  </fileSets>
+</assembly>
