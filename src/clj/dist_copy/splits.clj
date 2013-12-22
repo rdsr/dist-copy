@@ -264,8 +264,8 @@ duplicate files from further processing."
           rack-blocks (vec (keys rack-blocks)) 
           create-split enough-blocks create-split)))))
 
-(def conf (Configuration.))
-(.set conf "dist.copy.input.paths" "/tmp/f1, /tmp/hadoop*gz*")
-(.set conf "yarn.app.attempt.id" (str (rand-int 200)))
-(.set conf "dist.copy.num.tasks" "3")
-(create-splits-file conf)
+;(def conf (Configuration.))
+;(.set conf "dist.copy.input.paths" "/tmp/f1, /tmp/hadoop*gz*")
+;(.set conf "yarn.app.attempt.id" (str (rand-int 200)))
+;(.set conf "dist.copy.num.tasks" "4")
+;(create-splits-file conf)

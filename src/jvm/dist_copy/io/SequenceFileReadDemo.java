@@ -12,8 +12,12 @@ import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.util.ReflectionUtils;
 
 public class SequenceFileReadDemo {
+    /**
+     * @param args
+     * @throws IOException
+     */
     public static void main(String[] args) throws IOException {
-        final String uri = "hdfs://localhost:8020//tmp/hadoop-yarn/staging/38/splits.info.seq";
+        final String uri = "hdfs://localhost:8020//tmp/hadoop-yarn/staging/135/splits.info.seq";
         final Configuration conf = new Configuration();
         final FileSystem fs = FileSystem.get(URI.create(uri), conf);
         final Path path = new Path(uri);
