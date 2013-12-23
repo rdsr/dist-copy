@@ -147,10 +147,13 @@ duplicate files from further processing."
 
 
 (defn- compute-split-size
-  ""
+  "Derives the split-size given how many copy tasks you have configured.
+Note: the split size is capped at a min default split size (128mb in most 
+cases)"
   [conf data-size]
-  (let [default-block-size (* 128 1024 1024)]
+  (let [default-block-size (.get conf "dfs.namenode.fs-limits.min-block-size")]
     (max (.getInt conf "dist.copy.min.split.size" default-block-size)
+         ;; Todo: figure out a good default value for number copy tasks
          (/ data-size (.getInt conf "dist.copy.num.tasks" 1)))))
 
 
@@ -165,7 +168,7 @@ duplicate files from further processing."
 ;; Todo: maybe try transients on my nested maps here
 
 (defn- group-blocks-by
-  "Groups blocks based on the output of the function. 
+  "Groups blocks based on the output of the function f. 
 (f block) is expected to be a coll or it is converted 
 to one. This fn is mainly used to group blocks by either
 rack or host. Since a block may be present in multiple
@@ -186,11 +189,11 @@ hosts/racks, each host/rack gets a copy of the block"
 
 (defn- blocks->chunks
   "Converts a coll of blocks, grouped by host or rack, to a coll of @dist_copy.io.Chunks"
-  [conf grouped-by blocks]
+  [conf node blocks]
   (let [block (first blocks)
-        [host rack] (if (some #(= % grouped-by) (:h block))
-                      [grouped-by nil]
-                      [nil grouped-by])]
+        [host rack] (if (some #(= % node) (:h block))
+                      [node nil]
+                      [nil node])]
     (for [[path grouped-blocks] 
           (group-blocks-by :p blocks)] 
       ;; TODO: grouped-blocks can contain consecutive blocks, optimise this later
@@ -204,9 +207,9 @@ hosts/racks, each host/rack gets a copy of the block"
 
 (defn- create-split-fn
   [conf seqfile-writer used-blocks]
-  (fn [grouped-by blocks]
+  (fn [node blocks]
     (.addAll used-blocks blocks)
-    (.append seqfile-writer (NullWritable/get) (Split. (blocks->chunks conf grouped-by blocks)))))
+    (.append seqfile-writer (NullWritable/get) (Split. (blocks->chunks conf node blocks)))))
 
 
 (defn- create-splits
@@ -238,38 +241,45 @@ hosts/racks, each host/rack gets a copy of the block"
 
 
 (defn- splits-file-path
+  "Returns a path to where the @dsit_copy.io.Splits will be written"
   [conf]
   (Path.
-    ; TODO: check this
     (str (.get conf "yarn.app.mapreduce.am.staging-dir")
          "/" (.get conf "yarn.app.attempt.id") "/splits.info.seq")))
 
 
 (defn- seqfile-writer
+  "Each @dist_copy.io.Split will be written in a sequence file as 
+a value. The key will be a NullWritable"
   [conf]
   (let [path (splits-file-path conf)
         fs (.getFileSystem path conf)]
-    (SequenceFile/createWriter
-      fs conf path NullWritable Split)))
+    (SequenceFile/createWriter fs conf path NullWritable Split)))
 
 
 (defn create-splits-file
   [conf]
   (let [blocks      (all-blocks conf)
-        host-blocks (group-blocks-by :h blocks)
+        host-blocks (group-blocks-by :h blocks) ;; host-local blocks
         split-size  (compute-split-size conf (total-size blocks))]
 
     (with-open [sf-wr (seqfile-writer conf)]
-      (let [used-blocks   (HashSet.)
-            rack-blocks   (HashMap.)
+      (let [;; A block could be present under multiple hosts/racks, this
+            ;; set is used to filter out the blocks which have already
+            ;; been used to form a split.
+            used-blocks   (HashSet.) 
+            rack-blocks   (HashMap.) ;; rack-local blocks
             create-split  (create-split-fn conf sf-wr used-blocks)
             enough-blocks (partial enough-blocks split-size used-blocks)
-            not-enough-blocks (fn [host-or-rack blocks] 
+            not-enough-blocks (fn [_ blocks]
+                                ;; giving this fn. the same signature as create-split 
                                 (group-blocks-by rack-blocks :r blocks))]
 
+        ;; create host-local splits
         (create-splits
           host-blocks (vec (keys host-blocks)) 
           create-split enough-blocks not-enough-blocks)
+        ;; create rack-local splits
         (create-splits 
           rack-blocks (vec (keys rack-blocks)) 
           create-split enough-blocks create-split)))))
