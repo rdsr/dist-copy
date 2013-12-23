@@ -164,6 +164,7 @@ cases)"
       (+ sum (:l b))) 0 blocks))
 
 
+;; ----------------------------
 ;; higly imperative code follows :(
 ;; Todo: maybe try transients on my nested maps here
 
@@ -213,35 +214,40 @@ hosts/racks, each host/rack gets a copy of the block"
 
 
 (defn- create-splits
-  "Tries to create "
-  [k-blocks ks create-split enough-blocks not-enough-blocks]
-  (while (not (empty? k-blocks))
-    (let [k (rand-nth ks)
-          blocks (get k-blocks k)
-          [enough? blocks] (enough-blocks blocks)]
-      (if enough? 
-        (create-split k blocks)
-        (if (empty? blocks)
-          ;; No more blocks for host/rack 'k', 
-          ;; remove the key from the map 
-          (.remove k-blocks k)
-          (not-enough-blocks k blocks))))))
+  "Keeps creating node (host/rack) local splits by randomly
+choosing nodes. If there are enough blocks per node it creates 
+a split, else those blocks are handled by 'not-enough-blocks'
+Nodes are chosen randomly for proper split distribution."
+  [node-blocks create-split enough-blocks not-enough-blocks]
+  (let [nodes (vec (keys node-blocks))]
+    (while (not (empty? node-blocks))
+      (let [node (rand-nth nodes)
+            blocks (get node-blocks node)
+            [enough? blocks] (enough-blocks blocks)]
+        (if enough? 
+          (create-split node blocks)
+          (if (empty? blocks)
+            ;; No more blocks for node (host/rack), 
+            ;; remove the key from the map 
+            (.remove node-blocks node)
+            (not-enough-blocks node blocks)))))))
 
 
-(defn- enough-blocks
-  [split-size used-blocks blocks]
-  (loop [sz 0 acc (LinkedList.)]
-    (cond
-      (>= sz split-size) [true acc]
-      (empty? blocks) [false acc]
-      :else (let [b (.poll blocks)]
-              (if (contains? used-blocks b)
-                  (recur sz acc)
-                  (recur (+ sz (:l b)) (doto acc (.offer b))))))))
+(defn- enough-blocks-fn
+  [split-size used-blocks]
+  (fn [blocks]
+    (loop [sz 0 acc (LinkedList.)]
+      (cond
+        (>= sz split-size) [true acc]
+        (empty? blocks) [false acc]
+        :else (let [b (.poll blocks)]
+                (if (contains? used-blocks b)
+                    (recur sz acc)
+                    (recur (+ sz (:l b)) (doto acc (.offer b)))))))))
 
 
 (defn- splits-file-path
-  "Returns a path to where the @dsit_copy.io.Splits will be written"
+  "Returns a path to where @dsit_copy.io.Splits will be written"
   [conf]
   (Path.
     (str (.get conf "yarn.app.mapreduce.am.staging-dir")
@@ -264,22 +270,21 @@ a value. The key will be a NullWritable"
         split-size  (compute-split-size conf (total-size blocks))]
 
     (with-open [sf-wr (seqfile-writer conf)]
-      (let [;; A block could be present under multiple hosts/racks, this
-            ;; set is used to filter out the blocks which have already
-            ;; been used to form a split.
-            used-blocks   (HashSet.) 
+      (let [used-blocks   (HashSet.) ;; To filter out blocks already used in some split
             rack-blocks   (HashMap.) ;; rack-local blocks
             create-split  (create-split-fn conf sf-wr used-blocks)
-            enough-blocks (partial enough-blocks split-size used-blocks)
-            not-enough-blocks (fn [_ blocks]
-                                ;; giving this fn. the same signature as create-split 
+            enough-blocks (enough-blocks-fn split-size used-blocks)            
+            not-enough-blocks (fn [_ blocks] 
+                                ;; giving same signature to this fn as create-split, since 
+                                ;; either of 'create-split' or this fn could be used to
+                                ;; handle the case when we don't have >= split-size blocks
+                                ;; see (create-splits rack-blocks ...) below
                                 (group-blocks-by rack-blocks :r blocks))]
 
         ;; create host-local splits
         (create-splits
-          host-blocks (vec (keys host-blocks)) 
-          create-split enough-blocks not-enough-blocks)
+          host-blocks create-split enough-blocks not-enough-blocks) 
         ;; create rack-local splits
         (create-splits 
-          rack-blocks (vec (keys rack-blocks)) 
-          create-split enough-blocks create-split)))))
+          rack-blocks create-split enough-blocks create-split))))) 
+;; ----------------------------
