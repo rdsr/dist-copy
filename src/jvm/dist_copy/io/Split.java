@@ -9,6 +9,11 @@ import java.util.Collections;
 
 import org.apache.hadoop.io.Writable;
 
+/**
+ * A split is a collection of {@link Chunk} all of which are either rack-local or are host-local
+ * 
+ * @author rdsr
+ */
 public class Split implements Writable {
     private Collection<Chunk> chunks;
 
@@ -36,7 +41,7 @@ public class Split implements Writable {
     @Override
     public void write(DataOutput out) throws IOException {
         out.writeInt(chunks.size());
-        for (final Chunk c : chunks) {            
+        for (final Chunk c : chunks) {
             c.write(out);
         }
     }

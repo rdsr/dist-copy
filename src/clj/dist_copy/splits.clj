@@ -125,13 +125,13 @@ duplicate files from further processing."
         fs   (.getFileSystem path conf)]
   (letfn [(racks [_b] 
                  (map (fn [tp]
-                        (-> tp NodeBase. .getNetworkLocation))
+                        (-> tp NodeBase. .getNetworkLocation set))
                       (.getTopologyPaths _b)))
           (block [_b]
                  {:p path
                   :o (.getOffset _b)
                   :l (.getLength _b)
-                  :h (-> _b .getHosts seq)
+                  :h (-> _b .getHosts set)
                   :r (racks _b)})]
       (map block
            (if (instance? LocatedFileStatus file-status)
@@ -147,6 +147,7 @@ duplicate files from further processing."
 
 
 (defn- compute-split-size
+  ""
   [conf data-size]
   (let [default-block-size (* 128 1024 1024)]
     (max (.getInt conf "dist.copy.min.split.size" default-block-size)
@@ -164,6 +165,11 @@ duplicate files from further processing."
 ;; Todo: maybe try transients on my nested maps here
 
 (defn- group-blocks-by
+  "Groups blocks based on the output of the function. 
+(f block) is expected to be a coll or it is converted 
+to one. This fn is mainly used to group blocks by either
+rack or host. Since a block may be present in multiple
+hosts/racks, each host/rack gets a copy of the block"
   ([f blocks]
     (group-blocks-by (HashMap.) f blocks))
   ([m f blocks]
@@ -204,6 +210,7 @@ duplicate files from further processing."
 
 
 (defn- create-splits
+  "Tries to create "
   [k-blocks ks create-split enough-blocks not-enough-blocks]
   (while (not (empty? k-blocks))
     (let [k (rand-nth ks)
@@ -233,7 +240,7 @@ duplicate files from further processing."
 (defn- splits-file-path
   [conf]
   (Path.
-    ; TODO: check this, it may not be incorrect
+    ; TODO: check this
     (str (.get conf "yarn.app.mapreduce.am.staging-dir")
          "/" (.get conf "yarn.app.attempt.id") "/splits.info.seq")))
 

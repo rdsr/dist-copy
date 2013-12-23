@@ -13,6 +13,13 @@ import org.apache.hadoop.io.Writable;
 
 import com.google.common.base.Strings;
 
+/**
+ * A chunk is a collection of blocks, belonging to a single file and is either rack-local or
+ * host-local. i.e a Chunk would contain blocks which are all from the same machine or belong to the
+ * same rack.
+ * 
+ * @author rdsr
+ */
 public class Chunk implements Writable {
     private Path path;
     private String host, rack;
@@ -21,6 +28,7 @@ public class Chunk implements Writable {
     public Chunk() {}
 
     public Chunk(Path path, String host, String rack, Collection<Block> blocks) {
+        // Either of host or rack will be set, but not both
         this.path = path;
         this.host = host;
         this.rack = rack;
@@ -52,7 +60,7 @@ public class Chunk implements Writable {
         if (in.readBoolean()) {
             rack = Text.readString(in);
         }
-        int sz = in.readInt();
+        final int sz = in.readInt();
         blocks = new ArrayList<>(sz);
         for (int i = 0; i < sz; i++) {
             final Block b = new Block();

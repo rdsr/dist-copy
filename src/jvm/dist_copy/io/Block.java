@@ -3,26 +3,36 @@ package dist_copy.io;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.Writable;
 
+/**
+ * A block denotes an hdfs block.
+ * 
+ * @author rdsr
+ */
 public class Block implements Writable {
+    // Where in the hdfs file the block starts from.
     private long offset;
+    // Amount of data currently in this block. Will always be <= block-size of file
+    // i.e. The last block of a file may contain data less than the block-size
     private long len;
-    private Collection<String> hosts;
-    private Collection<String> racks;
+    // Set of hosts which contain this block
+    private Set<String> hosts;
+    // Set of racks which contain this block
+    private Set<String> racks;
 
     public Block() {}
 
-    public Block(long offset, long len, Collection<String> hosts, Collection<String> racks) {
+    public Block(long offset, long len, Set<String> hosts, Set<String> racks) {
         this.offset = offset;
         this.len = len;
-        this.hosts = new ArrayList<>(hosts);
-        this.racks = new ArrayList<>(racks);
+        this.hosts = new HashSet<>(hosts);
+        this.racks = new HashSet<>(racks);
     }
 
     public long getOffset() {
@@ -33,12 +43,12 @@ public class Block implements Writable {
         return len;
     }
 
-    public Collection<String> getHosts() {
-        return Collections.unmodifiableCollection(hosts);
+    public Set<String> getHosts() {
+        return Collections.unmodifiableSet(hosts);
     }
 
-    public Collection<String> getRacks() {
-        return Collections.unmodifiableCollection(racks);
+    public Set<String> getRacks() {
+        return Collections.unmodifiableSet(racks);
     }
 
     @Override
@@ -50,13 +60,13 @@ public class Block implements Writable {
     public void readFields(DataInput in) throws IOException {
         offset = in.readLong();
         len = in.readLong();
-        int hsz = in.readInt();
-        hosts = new ArrayList<>(hsz);
+        final int hsz = in.readInt();
+        hosts = new HashSet<>(hsz);
         for (int i = 0; i < hsz; i++) {
             hosts.add(Text.readString(in));
         }
-        int rsz = in.readInt();
-        racks = new ArrayList<>(rsz);
+        final int rsz = in.readInt();
+        racks = new HashSet<>(rsz);
         for (int i = 0; i < rsz; i++) {
             racks.add(Text.readString(in));
         }
@@ -76,4 +86,3 @@ public class Block implements Writable {
         }
     }
 }
-    
