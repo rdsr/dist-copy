@@ -270,7 +270,7 @@ a value. The key will be a NullWritable"
             rack-blocks   (HashMap.) ;; rack-local blocks
             create-split  (create-split-fn conf sf-wr used-blocks)
             enough-blocks (enough-blocks-fn split-size used-blocks)            
-            not-enough-blocks (fn [_ blocks] 
+            not-enough-blocks (fn [_ blocks]
                                 ;; giving same signature to this fn as create-split, since 
                                 ;; either of 'create-split' or this fn could be used to
                                 ;; handle the case when we don't have >= split-size blocks

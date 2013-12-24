@@ -1,4 +1,4 @@
-package dist_copy.io;
+package dist_copy.util;
 
 import java.io.IOException;
 import java.net.URI;
