@@ -147,16 +147,12 @@ duplicate files from further processing."
 
 
 (defn- compute-split-size
-  "Derives the split-size given how many copy tasks you have configured.
-Note: the split size is capped at a min default split size (128mb in most 
-cases)"
   [conf data-size]
-  (let [default-block-size (.get conf "dfs.namenode.fs-limits.min-block-size")]
-    (max (.getInt conf "dist.copy.min.split.size" default-block-size)
-         ;; Todo: figure out a good default value for number copy tasks
-         (/ data-size (.getInt conf "dist.copy.num.tasks" 1)))))
+  (let [min-split-size (.get conf "dfs.namenode.fs-limits.min-block-size")
+        split-size (.get conf "dist.copy.split.size")]
+    (min data-size (max min-split-size split-size))))
 
-
+    
 (defn- total-size
   [blocks]
   (reduce
