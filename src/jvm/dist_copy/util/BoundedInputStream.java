@@ -21,4 +21,9 @@ public class BoundedInputStream extends InputStream {
         read += 1l;
         return in.read();
     }
+    
+    @Override
+    public void close() throws IOException {
+        in.close();
+    }
 }
