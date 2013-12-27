@@ -70,13 +70,6 @@ import org.apache.hadoop.yarn.util.ConverterUtils;
 import org.apache.hadoop.yarn.util.Records;
 
 /**
- * An ApplicationMaster for executing shell commands on a set of launched containers using the YARN
- * framework.
- * 
- * <p>
- * This class is meant to act as an example on how to write yarn-based application masters.
- * </p>
- * 
  * <p>
  * The ApplicationMaster is started on a container by the <code>ResourceManager</code>'s launcher.
  * The first thing that the <code>ApplicationMaster</code> needs to do is to connect and register
