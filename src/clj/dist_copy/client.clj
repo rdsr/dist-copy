@@ -93,6 +93,8 @@
        (str "2>" ApplicationConstants/LOG_DIR_EXPANSION_VAR "dist-copy.stderr")]))
         
 
+(
+
 (defn- mk-AM-container
   "Setup container launch context for Application Master"
   []
@@ -102,9 +104,6 @@
       (.setEnv (mk-am-env conf))
       (.setCommands [(mk-am-cmd)])
       (.setTokens (security-tokens))))
-    
-    
-                         
     
   ;; local-resource
   ;; log file
