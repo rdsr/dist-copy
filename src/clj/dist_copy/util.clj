@@ -18,7 +18,8 @@
       (doseq [f (-> base-dir File. file-seq)]
         (when (.isFile f)
           (.putNextEntry os 
-            (ZipEntry. (-> f str (.replace  base-dir "")))))))))
+            (ZipEntry. (-> f str (.replace  base-dir "")))))))
+    zip))
     
 
 (defn- zip-file [resource rel-dir]
