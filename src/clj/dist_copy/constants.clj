@@ -5,4 +5,5 @@
 (def application-name "dist.copy.application.name")
 (def am-memory "dist.copy.am.memory.mb")
 (def dist-copy "dist-copy")
+(def app-id "dist.copy.application.id")
 

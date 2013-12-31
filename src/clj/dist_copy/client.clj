@@ -1,17 +1,18 @@
 (ns dist-copy.client
   (:require [clojure.pprint :as pp])
-  (:use [clojure.string :only (join blank?)] 
-        [dist-copy.util] 
+  (:use [clojure.string :only (join blank? trim)]
+        [dist-copy.util]
         [dist-copy.constants :as c])
   (:import [java.io File]
            [java.nio ByteBuffer]
-           [org.apache.hadoop.fs FileSystem]
+           [org.apache.hadoop.fs FileSystem Path]
            [org.apache.hadoop.io DataOutputBuffer]
            [org.apache.hadoop.security UserGroupInformation Credentials]
            [org.apache.hadoop.yarn.conf YarnConfiguration]
+           [org.apache.hadoop.yarn.util ConverterUtils]
            [org.apache.hadoop.yarn.client.api YarnClient YarnClientApplication]
-           [org.apache.hadoop.yarn.api.records ApplicationId ApplicationReport 
-            YarnApplicationState ContainerLaunchContext Resource]
+           [org.apache.hadoop.yarn.api.records ApplicationId ApplicationReport
+            LocalResource LocalResourceType LocalResourceVisibility YarnApplicationState ContainerLaunchContext Resource]
            [org.apache.hadoop.yarn.api ApplicationConstants ApplicationConstants$Environment]))
 
 
@@ -24,7 +25,7 @@
           (doseq [[k v] kvs]
             (.set conf (name k) (name v)))
           conf))
-  
+
 
 (defn- yarn-client
   ^YarnClient [^YarnConfiguration conf]
@@ -34,14 +35,14 @@
 
 
 (defn- app-classpath
-  [conf]
+  [^YarnConfiguration conf]
   ;; TODO Add log4j
   (join
     File/pathSeparatorChar
-    (map #(.trim %)  
-         (concat ["$CLASSPATH" "."]  
-                 (.getStrings conf  
-                   YarnConfiguration/YARN_APPLICATION_CLASSPATH 
+    (map #(trim %)
+         (concat ["$CLASSPATH" "."]
+                 (.getStrings conf
+                   YarnConfiguration/YARN_APPLICATION_CLASSPATH
                    YarnConfiguration/DEFAULT_YARN_APPLICATION_CLASSPATH)))))
 
 (defn- mk-AM-env
@@ -51,46 +52,62 @@
 
 
 (defn- mk-AM-cmd
-  [conf] 
-  (join " " 
+  [^YarnConfiguration conf]
+  (join " "
         ["$JAVA_HOME/bin/java"
         "-Xmx"
-        (str (.getInt conf c/am-memory 512) "m") 
+        (str (.getInt conf c/am-memory 512) "m")
         (str "1>" ApplicationConstants/LOG_DIR_EXPANSION_VAR c/app-name ".stdout")
         (str "2>" ApplicationConstants/LOG_DIR_EXPANSION_VAR c/app-name ".stderr")]))
 
 
 (defn- security-tokens
   ;; TODO test this out
-  [conf]
+  [^YarnConfiguration conf]
   (when (UserGroupInformation/isSecurityEnabled)
     (let [fs (FileSystem/get conf)
           creds (Credentials.)
           token-renewer (.get conf YarnConfiguration/RM_PRINCIPAL)]
-      (assert (-> token-renewer blank? not) 
+      (assert (-> token-renewer blank? not)
               "Can't get Master Kerberos principal for the RM to use as renewer")
       (.addDelegationTokens fs token-renewer creds)
       (let [dob (DataOutputBuffer.)]
         (.writeTokenStorageToStream creds dob)
         (ByteBuffer/wrap (.getData dob) 0 (.getLength dob))))))
-  
+
 
 (defn- am-jar
-  [conf] (archive dist_copy.ApplicationMaster))
+  [^YarnConfiguration conf] 
+  (let [fs (FileSystem/get conf)
+        src-path (-> dist_copy.ApplicationMaster archive Path.)
+        dst-path (Path. (join "/" 
+                              [(.getHomeDirectory fs) 
+                               (.get conf c/application-name)
+                               (.get conf c/app-id)
+                               "application-master.jar"]))
+        dst-status (.getFileStatus fs dst-path)]
+    (.copyFromLocalFile false true src-path dst-path)
+    (LocalResource/newInstance
+      (ConverterUtils/getYarnUrlFromPath dst-path)
+      LocalResourceType/FILE
+      LocalResourceVisibility/APPLICATION
+      (.getLen dst-status)
+      (.getModificationTime dst-status))))
+   
 
 (defn- mk-AM-launch-context
   "Setup container launch context for Application Master"
-  [conf]
-  (let [amc (mk-record ContainerLaunchContext)
+  [^YarnConfiguration conf]
+  (let [^ContainerLaunchContext amc (mk-record ContainerLaunchContext)
         local-resources {"application-master.jar" (am-jar conf)}]
     (doto amc
       (.setLocalResources local-resources)
-      (.setEnv (mk-am-env conf))
+      (.setEnvironment (mk-am-env conf))
       (.setCommands [(mk-am-cmd conf)])
       (.setTokens (security-tokens conf)))))
-  
 
-(defn- am-resource 
+
+(defn- am-resource
   [^YarnConfiguration conf]
   (doto (mk-record Resource)
     (.setMemory (.get conf c/am-memory))))
@@ -108,9 +125,9 @@
 
 (defn- monitor
   [^YarnClient yc ^ApplicationId app-id]
-  (letfn [(report 
+  (letfn [(report
             [] (let [r (.getApplicationReport yc app-id)
-                     app-state (.getYarnApplicationState r)]   
+                     app-state (.getYarnApplicationState r)]
                  {:app-id           (.getId app-id)
                   :client->AM-token (.getClientToAMToken r)
                   :app-diagnostics  (.getDiagnostics r)
@@ -121,7 +138,7 @@
                   :app-tracking-url (.getTrackingUrl r)
                   :finished (or (= app-state YarnApplicationState/FINISHED)
                                 (= app-state YarnApplicationState/KILLED))}))]
-    (doseq [r (take-while 
+    (doseq [r (take-while
                 (complement :finished)
                 (repeatedly report))]
       (pp/pprint r)
@@ -129,7 +146,7 @@
     (report)))) ;; Print last finshed report
 
 
-(defn- run 
+(defn- run
   [^YarnClient yc]
   (let [conf (.getConfig yc)
         app (.createApplication yc)]
@@ -137,7 +154,7 @@
     ;; TODO cap am-memory to max container memory
     (.submitApplication yc (mk-AM app conf))
     (monitor yc (.getApplicationId app))))
-    
+
 
 (defn copy
   [& kvargs]
