@@ -16,6 +16,9 @@
   (when (.isClusterUp cluster)
     (.shutdown cluster)))
 
+;; test chunks are in sorted order in a split
+;; test splits contain all the data
+;; test a block is present in only one chunk
 (deftest 
   (testing "splits file creation"
      (is (= 0 1))))
