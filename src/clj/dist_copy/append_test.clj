@@ -29,5 +29,6 @@
 
 (defn timeit
   [conf src dst sz]
-  (time (create-empty-file conf dst) 
-        (test-append conf src dst (* sz gb)))
+  (time 
+    (do (create-empty-file conf dst) 
+      (test-append conf src dst (* sz gb)))))

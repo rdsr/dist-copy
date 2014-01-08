@@ -2,6 +2,7 @@
   (:require [clojure.pprint :as pp])
   (:use [clojure.string :only (join blank? trim)]
         [dist-copy.util]
+        [dist-copy.reports]
         [dist-copy.constants :as c])
   (:import [java.io File]
            [java.nio ByteBuffer]
@@ -11,7 +12,7 @@
            [org.apache.hadoop.yarn.conf YarnConfiguration]
            [org.apache.hadoop.yarn.util ConverterUtils]
            [org.apache.hadoop.yarn.client.api YarnClient YarnClientApplication]
-           [org.apache.hadoop.yarn.api.records ApplicationId ApplicationReport
+           [org.apache.hadoop.yarn.api.records ApplicationId ApplicationReport ApplicationSubmissionContext
             LocalResource LocalResourceType LocalResourceVisibility YarnApplicationState ContainerLaunchContext Resource]
            [org.apache.hadoop.yarn.api ApplicationConstants ApplicationConstants$Environment]))
 
@@ -39,11 +40,12 @@
   ;; TODO Add log4j
   (join
     File/pathSeparatorChar
-    (map #(trim %)
-         (concat ["$CLASSPATH" "."]
-                 (.getStrings conf
-                   YarnConfiguration/YARN_APPLICATION_CLASSPATH
-                   YarnConfiguration/DEFAULT_YARN_APPLICATION_CLASSPATH)))))
+    (concat 
+      ["$CLASSPATH" "."]
+      (map #(trim %)
+        (.getStrings conf
+          YarnConfiguration/YARN_APPLICATION_CLASSPATH
+          YarnConfiguration/DEFAULT_YARN_APPLICATION_CLASSPATH)))))
 
 (defn- mk-AM-env
   [conf]
@@ -57,8 +59,8 @@
         ["$JAVA_HOME/bin/java"
         "-Xmx"
         (str (.getInt conf c/am-memory 512) "m")
-        (str "1>" ApplicationConstants/LOG_DIR_EXPANSION_VAR c/app-name ".stdout")
-        (str "2>" ApplicationConstants/LOG_DIR_EXPANSION_VAR c/app-name ".stderr")]))
+        (str "1>" ApplicationConstants/LOG_DIR_EXPANSION_VAR c/application-name ".stdout")
+        (str "2>" ApplicationConstants/LOG_DIR_EXPANSION_VAR c/application-name ".stderr")]))
 
 
 (defn- security-tokens
@@ -77,33 +79,38 @@
 
 
 (defn- am-jar
-  [^YarnConfiguration conf] 
+  [^YarnConfiguration conf]
   (let [fs (FileSystem/get conf)
         src-path (-> dist_copy.ApplicationMaster archive Path.)
-        dst-path (Path. (join "/" 
-                              [(.getHomeDirectory fs) 
+        dst-path (Path. (join "/"
+                              [(.getHomeDirectory fs)
                                (.get conf c/application-name)
                                (.get conf c/app-id)
                                "application-master.jar"]))
         dst-status (.getFileStatus fs dst-path)]
-    (.copyFromLocalFile false true src-path dst-path)
+    (.copyFromLocalFile fs false true src-path dst-path)
     (LocalResource/newInstance
       (ConverterUtils/getYarnUrlFromPath dst-path)
       LocalResourceType/FILE
       LocalResourceVisibility/APPLICATION
       (.getLen dst-status)
       (.getModificationTime dst-status))))
-   
 
-(defn- mk-AM-launch-context
+
+(defn- local-resources
+  [conf]
+  ;; For now just the am jar, maybe add log4j
+  ;; needs all the dependencies needed by AM (for instance: clojure.jar)
+  {:application-master.jar (am-jar conf)})
+
+(defn- setup-AM-launch-context
   "Setup container launch context for Application Master"
   [^YarnConfiguration conf]
-  (let [^ContainerLaunchContext amc (mk-record ContainerLaunchContext)
-        local-resources {"application-master.jar" (am-jar conf)}]
+  (let [^ContainerLaunchContext amc (mk-record ContainerLaunchContext)]
     (doto amc
-      (.setLocalResources local-resources)
-      (.setEnvironment (mk-am-env conf))
-      (.setCommands [(mk-am-cmd conf)])
+      (.setLocalResources (local-resources conf))
+      (.setEnvironment (mk-AM-env conf))
+      (.setCommands [(mk-AM-cmd conf)])
       (.setTokens (security-tokens conf)))))
 
 
@@ -114,7 +121,7 @@
 
 (defn- mk-AM
   "Setup Application Master"
-  [^YarnClientApplication app ^YarnConfiguration conf]
+  ^ApplicationSubmissionContext [^YarnClientApplication app ^YarnConfiguration conf]
   (doto (.getApplicationSubmissionContext app)
     (.setApplicationName (.get conf c/application-name))
     (.setAMContainerSpec (setup-AM-launch-context conf))
@@ -139,8 +146,7 @@
                   :finished (or (= app-state YarnApplicationState/FINISHED)
                                 (= app-state YarnApplicationState/KILLED))}))]
     (doseq [r (take-while
-                (complement :finished)
-                (repeatedly report))]
+                (complement :finished) (repeatedly report))]
       (pp/pprint r)
       (Thread/sleep 1000)
     (report)))) ;; Print last finshed report
@@ -149,11 +155,12 @@
 (defn- run
   [^YarnClient yc]
   (let [conf (.getConfig yc)
-        app (.createApplication yc)]
-        ;app-response (.getNewApplicationRespone app)]
+        app (.createApplication yc)
+        app-submission-context (mk-AM app conf)]
+    ; app-response (.getNewApplicationRespone app)]
     ;; TODO cap am-memory to max container memory
-    (.submitApplication yc (mk-AM app conf))
-    (monitor yc (.getApplicationId app))))
+    (.submitApplication yc app-submission-context)
+    (monitor yc (.getApplicationId app-submission-context))))
 
 
 (defn copy

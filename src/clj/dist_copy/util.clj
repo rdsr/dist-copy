@@ -1,6 +1,6 @@
 (ns dist-copy.util
   (:import [java.io File FileOutputStream BufferedOutputStream]
-           [java.util.zip ZipOutputStream ZipEntry] 
+           [java.util.zip ZipOutputStream ZipEntry]
            [org.apache.hadoop.yarn.util Records]))
 
 
@@ -17,23 +17,25 @@
     (with-open [os (-> zip FileOutputStream. BufferedOutputStream. ZipOutputStream.)]
       (doseq [f (-> base-dir File. file-seq)]
         (when (.isFile f)
-          (.putNextEntry os 
+          (.putNextEntry os
             (ZipEntry. (-> f str (.replace  base-dir "")))))))
     zip))
-    
+
 
 (defn- zip-file [resource rel-dir]
-  (let [rel-dir (if (.startsWith rel-dir "/") 
+  (let [rel-dir (if (.startsWith rel-dir "/")
                   (subs rel-dir 1)
                   rel-dir)
         dir (-> resource .getPath)]
-    (create-zip 
+    (create-zip
       (.substring dir 0 (.indexOf dir rel-dir)))))
-              
 
-(defn archive [clazz]
-  (let [name (str "/" 
-                  (.. clazz getName (replace "." "/")) 
+
+(defn archive
+  "Given a class, returns the jar (from classpath) in which it could be found"
+  ^String [clazz]
+  (let [name (str "/"
+                  (.. clazz getName (replace "." "/"))
                   ".class")
         resource (.getResource clazz name)]
     (if (= "jar" (.getProtocol resource))
